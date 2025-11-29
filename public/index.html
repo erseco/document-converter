@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Converter - ZetaJS</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f5f5f5;
+        }
+        .status {
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="status">
+        <div class="spinner" id="spinner"></div>
+        <p id="statusText">Initializing ZetaJS...</p>
+    </div>
+
+    <script type="module">
+        const statusText = document.getElementById('statusText');
+        const spinner = document.getElementById('spinner');
+
+        // ZetaJS CDN configuration - pinned version for stability
+        const ZETAJS_VERSION = '1.2.0';
+        const ZETAJS_BASE_URL = `https://cdn.jsdelivr.net/npm/zetajs@${ZETAJS_VERSION}`;
+
+        // Get allowed origins from URL parameter or allow all by default
+        // Usage: ?origins=https://example.com,https://another.com
+        const urlParams = new URLSearchParams(window.location.search);
+        const allowedOriginsParam = urlParams.get('origins');
+        const allowedOrigins = allowedOriginsParam 
+            ? allowedOriginsParam.split(',').map(o => o.trim())
+            : null; // null means allow all origins
+
+        let zeta = null;
+        let moduleReady = false;
+        let parentOrigin = null;
+
+        // Validate if origin is allowed
+        function isOriginAllowed(origin) {
+            if (!allowedOrigins) return true; // Allow all if no whitelist
+            if (origin === 'null') return true; // Allow null origin for file:// or sandboxed iframes
+            return allowedOrigins.includes(origin);
+        }
+
+        // Get safe target origin for postMessage
+        function getTargetOrigin(eventOrigin) {
+            // For null origins (file:// or sandboxed iframes), use '*'
+            if (eventOrigin === 'null' || !eventOrigin) return '*';
+            return eventOrigin;
+        }
+
+        // Update status display
+        function updateStatus(message, showSpinner = true) {
+            statusText.textContent = message;
+            spinner.classList.toggle('hidden', !showSpinner);
+        }
+
+        // Initialize ZetaJS
+        async function initZetaJS() {
+            try {
+                updateStatus('Loading ZetaJS module...');
+                
+                // Import ZetaJS from CDN with pinned version
+                const { createZetaModule } = await import(`${ZETAJS_BASE_URL}/zetajs.mjs`);
+                
+                updateStatus('Initializing LibreOffice WASM...');
+                
+                zeta = await createZetaModule({
+                    locateFile: (path) => `${ZETAJS_BASE_URL}/${path}`
+                });
+                
+                moduleReady = true;
+                updateStatus('Ready for document conversion', false);
+                
+                // Notify parent that we're ready
+                if (window.parent !== window) {
+                    window.parent.postMessage({ type: 'ready' }, '*');
+                }
+            } catch (error) {
+                updateStatus(`Error initializing: ${error.message}`, false);
+                console.error('ZetaJS initialization error:', error);
+                
+                if (window.parent !== window) {
+                    window.parent.postMessage({ type: 'error', error: error.message }, '*');
+                }
+            }
+        }
+
+        // Convert document using ZetaJS
+        async function convertDocument(arrayBuffer, outputFormat = 'pdf') {
+            if (!moduleReady || !zeta) {
+                throw new Error('ZetaJS not initialized');
+            }
+
+            updateStatus('Converting document...');
+
+            try {
+                const inputData = new Uint8Array(arrayBuffer);
+                
+                // Write input file to virtual filesystem
+                const inputPath = '/tmp/input';
+                zeta.FS.writeFile(inputPath, inputData);
+                
+                // Determine output extension based on format
+                const formatExtensions = {
+                    'pdf': 'pdf',
+                    'docx': 'docx',
+                    'xlsx': 'xlsx',
+                    'pptx': 'pptx',
+                    'odt': 'odt',
+                    'ods': 'ods',
+                    'odp': 'odp',
+                    'html': 'html',
+                    'txt': 'txt',
+                    'rtf': 'rtf',
+                    'png': 'png',
+                    'jpg': 'jpg'
+                };
+                
+                const extension = formatExtensions[outputFormat.toLowerCase()] || 'pdf';
+                const outputPath = `/tmp/output.${extension}`;
+                
+                // Get filter name for conversion
+                const filterMap = {
+                    'pdf': 'writer_pdf_Export',
+                    'docx': 'MS Word 2007 XML',
+                    'xlsx': 'Calc MS Excel 2007 XML',
+                    'pptx': 'Impress MS PowerPoint 2007 XML',
+                    'odt': 'writer8',
+                    'ods': 'calc8',
+                    'odp': 'impress8',
+                    'html': 'HTML (StarWriter)',
+                    'txt': 'Text',
+                    'rtf': 'Rich Text Format',
+                    'png': 'writer_png_Export',
+                    'jpg': 'writer_jpg_Export'
+                };
+                
+                const filterName = filterMap[outputFormat.toLowerCase()] || 'writer_pdf_Export';
+                
+                // Load the document
+                const desktop = zeta.getDesktop();
+                const doc = await desktop.loadComponentFromURL(
+                    `file://${inputPath}`,
+                    '_blank',
+                    0,
+                    []
+                );
+                
+                if (!doc) {
+                    throw new Error('Failed to load document');
+                }
+                
+                // Export to the desired format
+                const exportProps = [
+                    { Name: 'FilterName', Value: filterName },
+                    { Name: 'Overwrite', Value: true }
+                ];
+                
+                await doc.storeToURL(`file://${outputPath}`, exportProps);
+                doc.close(true);
+                
+                // Read the output file
+                const outputData = zeta.FS.readFile(outputPath);
+                
+                // Clean up temporary files
+                try {
+                    zeta.FS.unlink(inputPath);
+                    zeta.FS.unlink(outputPath);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+                
+                // Determine MIME type
+                const mimeTypes = {
+                    'pdf': 'application/pdf',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    'odt': 'application/vnd.oasis.opendocument.text',
+                    'ods': 'application/vnd.oasis.opendocument.spreadsheet',
+                    'odp': 'application/vnd.oasis.opendocument.presentation',
+                    'html': 'text/html',
+                    'txt': 'text/plain',
+                    'rtf': 'application/rtf',
+                    'png': 'image/png',
+                    'jpg': 'image/jpeg'
+                };
+                
+                const mimeType = mimeTypes[extension] || 'application/octet-stream';
+                const blob = new Blob([outputData], { type: mimeType });
+                
+                updateStatus('Conversion complete', false);
+                
+                return blob;
+            } catch (error) {
+                updateStatus(`Conversion error: ${error.message}`, false);
+                throw error;
+            }
+        }
+
+        // Listen for messages from parent window
+        window.addEventListener('message', async (event) => {
+            const { data, origin, source } = event;
+            
+            // Validate origin if whitelist is configured
+            if (!isOriginAllowed(origin)) {
+                console.warn(`Rejected message from unauthorized origin: ${origin}`);
+                return;
+            }
+
+            const targetOrigin = getTargetOrigin(origin);
+            
+            // Handle conversion request
+            if (data && data.type === 'convert') {
+                try {
+                    if (!data.buffer) {
+                        throw new Error('No document buffer provided');
+                    }
+                    
+                    const arrayBuffer = data.buffer instanceof ArrayBuffer 
+                        ? data.buffer 
+                        : data.buffer.buffer || data.buffer;
+                    
+                    const outputFormat = data.format || 'pdf';
+                    const blob = await convertDocument(arrayBuffer, outputFormat);
+                    
+                    // Send the result back to parent
+                    source.postMessage({
+                        type: 'result',
+                        blob: blob,
+                        format: outputFormat,
+                        requestId: data.requestId
+                    }, targetOrigin);
+                    
+                } catch (error) {
+                    source.postMessage({
+                        type: 'error',
+                        error: error.message,
+                        requestId: data.requestId
+                    }, targetOrigin);
+                }
+            }
+            
+            // Handle ping/status check
+            if (data && data.type === 'ping') {
+                source.postMessage({
+                    type: 'pong',
+                    ready: moduleReady,
+                    requestId: data.requestId
+                }, targetOrigin);
+            }
+        });
+
+        // Initialize on load
+        initZetaJS();
+    </script>
+</body>
+</html>
