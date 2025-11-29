@@ -41,7 +41,8 @@ function downloadFile(url, destPath) {
             if (response.statusCode === 301 || response.statusCode === 302) {
                 file.close();
                 fs.unlinkSync(destPath);
-                downloadFile(response.headers.location, destPath)
+                const redirectUrl = new URL(response.headers.location, url).href;
+                downloadFile(redirectUrl, destPath)
                     .then(resolve)
                     .catch(reject);
                 return;
@@ -75,7 +76,9 @@ function downloadFile(url, destPath) {
             
             file.on('error', (err) => {
                 file.close();
-                fs.unlinkSync(destPath);
+                if (fs.existsSync(destPath)) {
+                    fs.unlinkSync(destPath);
+                }
                 reject(err);
             });
         }).on('error', (err) => {

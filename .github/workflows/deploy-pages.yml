@@ -36,8 +36,16 @@ jobs:
       - name: Copy zetajs library files
         run: |
           mkdir -p docs/vendor/zetajs
-          cp node_modules/zetajs/source/zeta.js docs/vendor/zetajs/
-          cp node_modules/zetajs/source/zetaHelper.js docs/vendor/zetajs/
+          if [ -f "node_modules/zetajs/source/zeta.js" ]; then
+            cp node_modules/zetajs/source/zeta.js docs/vendor/zetajs/
+          else
+            echo "Warning: zeta.js not found" && exit 1
+          fi
+          if [ -f "node_modules/zetajs/source/zetaHelper.js" ]; then
+            cp node_modules/zetajs/source/zetaHelper.js docs/vendor/zetajs/
+          else
+            echo "Warning: zetaHelper.js not found" && exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
