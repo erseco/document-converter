@@ -18,10 +18,8 @@ const ZETAOFFICE_CDN = 'https://cdn.zetaoffice.net/zetaoffice_latest';
 // Files to download from ZetaOffice CDN
 const WASM_FILES = [
     'soffice.js',
-    'soffice.js.metadata',
     'soffice.wasm',
-    'soffice.data',
-    'soffice.data.js.metadata'
+    'soffice.data'
 ];
 
 // Target directory for GitHub Pages
