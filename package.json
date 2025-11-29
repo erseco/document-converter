@@ -1,0 +1,30 @@
+{
+  "name": "document-converter",
+  "version": "1.0.0",
+  "description": "A static microservice that uses ZetaJS (LibreOffice WASM) to convert documents in the browser",
+  "type": "module",
+  "scripts": {
+    "download-wasm": "node scripts/download-wasm.js",
+    "build": "npm run download-wasm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erseco/document-converter.git"
+  },
+  "keywords": [
+    "document-converter",
+    "libreoffice",
+    "wasm",
+    "zetajs",
+    "pdf"
+  ],
+  "author": "Ernesto Serrano",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/erseco/document-converter/issues"
+  },
+  "homepage": "https://github.com/erseco/document-converter#readme",
+  "dependencies": {
+    "zetajs": "^1.2.0"
+  }
+}

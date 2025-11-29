@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# WASM files (downloaded by GitHub Actions, too large for git)
+docs/wasm/
+
+# Vendor files (copied from node_modules by GitHub Actions)
+docs/vendor/
+
+# Build artifacts
+*.log
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+*.tmp
