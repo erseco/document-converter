@@ -4,6 +4,8 @@
  * This module handles iframe communication with WordPress Playground
  * and manages document conversion using ZetaJS/LibreOffice WASM.
  * 
+ * Uses locally hosted WASM files downloaded via GitHub Actions.
+ * 
  * Message Protocol:
  * - Receives: { type: 'convert', file: ArrayBuffer, format: string, requestId: any }
  * - Sends: { type: 'ready' } when ZetaJS is initialized
@@ -11,9 +13,9 @@
  * - Sends: { type: 'error', error: string, requestId: any } on failure
  */
 
-// ZetaJS CDN configuration - pinned version for stability
-const ZETAJS_VERSION = '1.2.0';
-const ZETAJS_BASE_URL = `https://cdn.jsdelivr.net/npm/zetajs@${ZETAJS_VERSION}`;
+// Local paths for WASM files (downloaded by GitHub Actions)
+const WASM_BASE_URL = './wasm';
+const ZETAJS_BASE_URL = './vendor/zetajs';
 
 // Get allowed origins from URL parameter or allow all by default
 // Usage: ?origins=https://example.com,https://another.com
@@ -23,8 +25,11 @@ const allowedOrigins = allowedOriginsParam
     ? allowedOriginsParam.split(',').map(o => o.trim())
     : null; // null means allow all origins
 
-let zeta = null;
+let zHM = null;
 let moduleReady = false;
+
+// Store pending conversion requests
+const pendingRequests = new Map();
 
 // Format configuration maps
 const formatExtensions = {
@@ -112,26 +117,176 @@ function notifyParent(message, targetOrigin = '*') {
 }
 
 /**
- * Initialize ZetaJS module
+ * Create office thread script as blob URL
+ */
+function createOfficeThreadBlob() {
+    const zetajsUrl = new URL(`${ZETAJS_BASE_URL}/zetaHelper.js`, window.location.href).href;
+    
+    const code = `
+        import { ZetaHelperThread } from '${zetajsUrl}';
+        
+        const zHT = new ZetaHelperThread();
+        const zetajs = zHT.zetajs;
+        const css = zHT.css;
+        
+        const filterMap = {
+            'pdf': 'writer_pdf_Export',
+            'docx': 'MS Word 2007 XML',
+            'xlsx': 'Calc MS Excel 2007 XML',
+            'pptx': 'Impress MS PowerPoint 2007 XML',
+            'odt': 'writer8',
+            'ods': 'calc8',
+            'odp': 'impress8',
+            'html': 'HTML (StarWriter)',
+            'txt': 'Text',
+            'rtf': 'Rich Text Format',
+            'png': 'writer_png_Export',
+            'jpg': 'writer_jpg_Export'
+        };
+        
+        const bean_hidden = new css.beans.PropertyValue({Name: 'Hidden', Value: true});
+        const bean_overwrite = new css.beans.PropertyValue({Name: 'Overwrite', Value: true});
+        
+        zHT.thrPort.onmessage = (e) => {
+            switch (e.data.cmd) {
+                case 'convert':
+                    try {
+                        const { from, to, format, requestId } = e.data;
+                        const filterName = filterMap[format.toLowerCase()] || 'writer_pdf_Export';
+                        const bean_filter = new css.beans.PropertyValue({Name: 'FilterName', Value: filterName});
+                        
+                        const xModel = zHT.desktop.loadComponentFromURL('file://' + from, '_blank', 0, [bean_hidden]);
+                        if (!xModel) {
+                            throw new Error('Failed to load document');
+                        }
+                        xModel.storeToURL('file://' + to, [bean_overwrite, bean_filter]);
+                        xModel.close(true);
+                        
+                        zHT.thrPort.postMessage({cmd: 'converted', from, to, format, requestId});
+                    } catch (err) {
+                        const exc = zetajs.catchUnoException(err);
+                        const errMsg = exc ? exc.Message : (err.message || String(err));
+                        zHT.thrPort.postMessage({cmd: 'error', error: errMsg, requestId: e.data.requestId});
+                    }
+                    break;
+                default:
+                    console.warn('Unknown command in office thread:', e.data.cmd);
+            }
+        };
+        
+        zHT.thrPort.postMessage({cmd: 'ready'});
+    `;
+    const blob = new Blob([code], { type: 'text/javascript' });
+    return URL.createObjectURL(blob);
+}
+
+/**
+ * Handle messages from the worker thread
+ */
+function handleWorkerMessage(e) {
+    switch (e.data.cmd) {
+        case 'ready':
+            moduleReady = true;
+            updateStatus('Ready for document conversion', false);
+            notifyParent({ type: 'ready' });
+            break;
+            
+        case 'converted':
+            {
+                const { from, to, format, requestId } = e.data;
+                const request = pendingRequests.get(requestId);
+                if (request) {
+                    try {
+                        // Read the output file from the virtual filesystem
+                        const outputData = zHM.FS.readFile(to);
+                        
+                        // Clean up temporary files
+                        try {
+                            zHM.FS.unlink(from);
+                            zHM.FS.unlink(to);
+                        } catch (cleanupErr) {
+                            // Ignore cleanup errors
+                        }
+                        
+                        const mimeType = mimeTypes[format] || 'application/octet-stream';
+                        const blob = new Blob([outputData], { type: mimeType });
+                        
+                        updateStatus('Conversion complete', false);
+                        
+                        request.source.postMessage({
+                            type: 'result',
+                            blob: blob,
+                            format: format,
+                            requestId: requestId
+                        }, request.targetOrigin);
+                    } catch (err) {
+                        request.source.postMessage({
+                            type: 'error',
+                            error: err.message,
+                            requestId: requestId
+                        }, request.targetOrigin);
+                    }
+                    pendingRequests.delete(requestId);
+                }
+            }
+            break;
+            
+        case 'error':
+            {
+                const { error, requestId } = e.data;
+                const request = pendingRequests.get(requestId);
+                if (request) {
+                    updateStatus(`Conversion error: ${error}`, false);
+                    request.source.postMessage({
+                        type: 'error',
+                        error: error,
+                        requestId: requestId
+                    }, request.targetOrigin);
+                    pendingRequests.delete(requestId);
+                }
+            }
+            break;
+    }
+}
+
+/**
+ * Initialize ZetaJS module using local WASM files
  */
 export async function initZetaJS() {
     try {
         updateStatus('Loading ZetaJS module...');
         
-        // Import ZetaJS from CDN with pinned version
-        const { createZetaModule } = await import(`${ZETAJS_BASE_URL}/zetajs.mjs`);
+        // Import ZetaHelperMain from local vendor folder
+        const { ZetaHelperMain } = await import(`${ZETAJS_BASE_URL}/zetaHelper.js`);
         
         updateStatus('Initializing LibreOffice WASM...');
         
-        zeta = await createZetaModule({
-            locateFile: (path) => `${ZETAJS_BASE_URL}/${path}`
+        // Get absolute URL for WASM files
+        const wasmUrl = new URL(WASM_BASE_URL + '/', window.location.href).href;
+        
+        // Create ZetaHelperMain with local WASM files
+        zHM = new ZetaHelperMain(null, {
+            wasmPkg: 'url:' + wasmUrl,
+            blockPageScroll: false
         });
         
-        moduleReady = true;
-        updateStatus('Ready for document conversion', false);
-        
-        // Notify parent that we're ready
-        notifyParent({ type: 'ready' });
+        // Start ZetaOffice
+        zHM.start(() => {
+            zHM.thrPort.onmessage = (e) => {
+                switch (e.data.cmd) {
+                    case 'ZetaHelper::thr_started':
+                        // Now inject our conversion logic
+                        zHM.thrPort.postMessage({
+                            cmd: 'ZetaHelper::run_thr_script',
+                            threadJs: createOfficeThreadBlob(),
+                            threadJsType: 'module'
+                        });
+                        break;
+                    default:
+                        handleWorkerMessage(e);
+                }
+            };
+        });
         
         return true;
     } catch (error) {
@@ -146,10 +301,12 @@ export async function initZetaJS() {
  * Convert document using ZetaJS
  * @param {ArrayBuffer} arrayBuffer - The document data
  * @param {string} outputFormat - Target format (pdf, docx, etc.)
- * @returns {Promise<Blob>} - The converted document
+ * @param {string} requestId - Request identifier
+ * @param {MessageEventSource} source - Message source for response
+ * @param {string} targetOrigin - Target origin for response
  */
-export async function convertDocument(arrayBuffer, outputFormat = 'pdf') {
-    if (!moduleReady || !zeta) {
+export async function convertDocument(arrayBuffer, outputFormat, requestId, source, targetOrigin) {
+    if (!moduleReady || !zHM) {
         throw new Error('ZetaJS not initialized');
     }
 
@@ -157,58 +314,24 @@ export async function convertDocument(arrayBuffer, outputFormat = 'pdf') {
 
     try {
         const inputData = new Uint8Array(arrayBuffer);
-
-        // Write input file to virtual filesystem
         const inputPath = '/tmp/input';
-        try {
-            zeta.FS.writeFile(inputPath, inputData);
-        } catch (fsError) {
-            throw new Error(`Failed to write input file to filesystem: ${fsError.message}`);
-        }
-
         const extension = formatExtensions[outputFormat.toLowerCase()] || 'pdf';
         const outputPath = `/tmp/output.${extension}`;
-        const filterName = filterMap[outputFormat.toLowerCase()] || 'writer_pdf_Export';
-
-        // Load the document
-        const desktop = zeta.getDesktop();
-        const doc = await desktop.loadComponentFromURL(
-            `file://${inputPath}`,
-            '_blank',
-            0,
-            []
-        );
-
-        if (!doc) {
-            throw new Error('Failed to load document');
-        }
         
-        // Export to the desired format
-        const exportProps = [
-            { Name: 'FilterName', Value: filterName },
-            { Name: 'Overwrite', Value: true }
-        ];
+        // Write input file to virtual filesystem
+        zHM.FS.writeFile(inputPath, inputData);
         
-        await doc.storeToURL(`file://${outputPath}`, exportProps);
-        doc.close(true);
+        // Store the request for later
+        pendingRequests.set(requestId, { source, targetOrigin, format: outputFormat });
         
-        // Read the output file
-        const outputData = zeta.FS.readFile(outputPath);
-        
-        // Clean up temporary files
-        try {
-            zeta.FS.unlink(inputPath);
-            zeta.FS.unlink(outputPath);
-        } catch (e) {
-            // Ignore cleanup errors
-        }
-        
-        const mimeType = mimeTypes[extension] || 'application/octet-stream';
-        const blob = new Blob([outputData], { type: mimeType });
-        
-        updateStatus('Conversion complete', false);
-        
-        return blob;
+        // Send conversion request to worker
+        zHM.thrPort.postMessage({
+            cmd: 'convert',
+            from: inputPath,
+            to: outputPath,
+            format: outputFormat,
+            requestId: requestId
+        });
     } catch (error) {
         updateStatus(`Conversion error: ${error.message}`, false);
         throw error;
@@ -258,15 +381,9 @@ window.addEventListener('message', async (event) => {
             }
 
             const outputFormat = data.format || 'pdf';
-            const blob = await convertDocument(arrayBuffer, outputFormat);
-
-            // Send the result back to parent
-            source.postMessage({
-                type: 'result',
-                blob: blob,
-                format: outputFormat,
-                requestId: data.requestId
-            }, targetOrigin);
+            const requestId = data.requestId || Date.now().toString();
+            
+            await convertDocument(arrayBuffer, outputFormat, requestId, source, targetOrigin);
             
         } catch (error) {
             source.postMessage({

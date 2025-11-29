@@ -43,7 +43,9 @@
     <canvas id="qtcanvas" style="display: none"></canvas>
 
     <script type="module">
-        import { ZetaHelperMain } from 'https://cdn.jsdelivr.net/npm/zetajs@1.2.0/source/zetaHelper.js';
+        // ZetaJS and ZetaOffice CDN configuration
+        const ZETAJS_CDN = 'https://cdn.jsdelivr.net/npm/zetajs@1.2.0/source';
+        const ZETAOFFICE_CDN = 'https://cdn.zetaoffice.net/zetaoffice_latest/';
 
         const statusText = document.getElementById('statusText');
         const spinner = document.getElementById('spinner');
@@ -99,77 +101,23 @@
         const pendingRequests = new Map();
 
         // Initialize ZetaJS using ZetaHelperMain
-        function initZetaJS() {
+        async function initZetaJS() {
             try {
-                updateStatus('Loading ZetaOffice WASM...');
+                updateStatus('Loading ZetaJS module...');
                 
-                // Create the office thread script as a blob URL
-                const officeThreadCode = `
-                    import { ZetaHelperThread } from 'https://cdn.jsdelivr.net/npm/zetajs@1.2.0/source/zetaHelper.js';
-                    
-                    const zHT = new ZetaHelperThread();
-                    const zetajs = zHT.zetajs;
-                    const css = zHT.css;
-                    
-                    // Filter name mapping for different output formats
-                    const filterMap = {
-                        'pdf': 'writer_pdf_Export',
-                        'docx': 'MS Word 2007 XML',
-                        'xlsx': 'Calc MS Excel 2007 XML',
-                        'pptx': 'Impress MS PowerPoint 2007 XML',
-                        'odt': 'writer8',
-                        'ods': 'calc8',
-                        'odp': 'impress8',
-                        'html': 'HTML (StarWriter)',
-                        'txt': 'Text',
-                        'rtf': 'Rich Text Format',
-                        'png': 'writer_png_Export',
-                        'jpg': 'writer_jpg_Export'
-                    };
-                    
-                    const bean_hidden = new css.beans.PropertyValue({Name: 'Hidden', Value: true});
-                    const bean_overwrite = new css.beans.PropertyValue({Name: 'Overwrite', Value: true});
-                    
-                    zHT.thrPort.onmessage = (e) => {
-                        switch (e.data.cmd) {
-                            case 'convert':
-                                try {
-                                    const { from, to, format, requestId, inputExt } = e.data;
-                                    const filterName = filterMap[format.toLowerCase()] || 'writer_pdf_Export';
-                                    const bean_filter = new css.beans.PropertyValue({Name: 'FilterName', Value: filterName});
-                                    
-                                    const xModel = zHT.desktop.loadComponentFromURL('file://' + from, '_blank', 0, [bean_hidden]);
-                                    if (!xModel) {
-                                        throw new Error('Failed to load document');
-                                    }
-                                    xModel.storeToURL('file://' + to, [bean_overwrite, bean_filter]);
-                                    xModel.close(true);
-                                    
-                                    zHT.thrPort.postMessage({cmd: 'converted', from, to, format, requestId});
-                                } catch (err) {
-                                    const exc = zetajs.catchUnoException(err);
-                                    const errMsg = exc ? exc.Message : err.message;
-                                    zHT.thrPort.postMessage({cmd: 'error', error: errMsg, requestId: e.data.requestId});
-                                }
-                                break;
-                            default:
-                                throw Error('Unknown message command: ' + e.data.cmd);
-                        }
-                    };
-                    
-                    zHT.thrPort.postMessage({cmd: 'ready'});
-                `;
+                // Dynamic import of ZetaHelperMain
+                const { ZetaHelperMain } = await import(`${ZETAJS_CDN}/zetaHelper.js`);
+                
+                updateStatus('Initializing LibreOffice WASM...');
                 
                 // Use the ZetaOffice CDN for WASM binaries
                 zHM = new ZetaHelperMain(null, {
-                    wasmPkg: 'free',
+                    wasmPkg: 'url:' + ZETAOFFICE_CDN,
                     blockPageScroll: false
                 });
                 
                 // Start ZetaOffice
                 zHM.start(() => {
-                    updateStatus('Initializing LibreOffice WASM...');
-                    
                     zHM.thrPort.onmessage = (e) => {
                         switch (e.data.cmd) {
                             case 'ZetaHelper::thr_started':
@@ -205,7 +153,7 @@
         // Create a blob URL for the office thread script
         function createOfficeThreadBlob() {
             const code = `
-                import { ZetaHelperThread } from 'https://cdn.jsdelivr.net/npm/zetajs@1.2.0/source/zetaHelper.js';
+                import { ZetaHelperThread } from '${ZETAJS_CDN}/zetaHelper.js';
                 
                 const zHT = new ZetaHelperThread();
                 const zetajs = zHT.zetajs;
