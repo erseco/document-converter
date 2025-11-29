@@ -1,6 +1,6 @@
 # Document Converter
 
-A static microservice for Vercel that uses ZetaJS (LibreOffice WASM) to convert documents in the browser.
+A static microservice that uses ZetaJS (LibreOffice WASM) to convert documents in the browser. Supports deployment on Vercel and GitHub Pages.
 
 ## Features
 
@@ -8,8 +8,11 @@ A static microservice for Vercel that uses ZetaJS (LibreOffice WASM) to convert 
 - **Iframe-compatible** with proper CORS and security headers for SharedArrayBuffer support
 - **Multiple format support**: PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, HTML, TXT, RTF, PNG, JPG
 - **Origin whitelist** optional security feature to restrict which domains can use the converter
+- **GitHub Pages support** via Service Worker COOP/COEP headers
 
 ## Deployment
+
+### Option 1: Vercel (Recommended)
 
 Deploy to Vercel:
 
@@ -21,12 +24,34 @@ Or click the deploy button:
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/erseco/document-converter)
 
+### Option 2: GitHub Pages
+
+GitHub Pages doesn't allow configuring server headers, so we use a Service Worker approach to enable Cross-Origin Isolation (required for SharedArrayBuffer).
+
+1. Enable GitHub Pages in your repository settings, using the `docs` folder as source
+2. Your converter will be available at `https://yourusername.github.io/document-converter/`
+
+**Files in the `docs/` folder:**
+- `coi-serviceworker.js` - Service Worker that adds COOP/COEP headers
+- `index.html` - Main page that loads the Service Worker and ZetaJS
+- `converter.js` - Message handler for iframe communication
+
+The Service Worker intercepts all requests and adds the necessary headers:
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+
 ## Usage
 
 ### Embedding in an iframe
 
+**Vercel deployment:**
 ```html
 <iframe id="converter" src="https://your-vercel-deployment.vercel.app"></iframe>
+```
+
+**GitHub Pages deployment:**
+```html
+<iframe id="converter" src="https://yourusername.github.io/document-converter/"></iframe>
 ```
 
 ### With origin whitelist (optional security)
@@ -66,20 +91,55 @@ async function convertDocument(file, format = 'pdf') {
     
     iframe.contentWindow.postMessage({
         type: 'convert',
-        buffer: arrayBuffer,
+        buffer: arrayBuffer,  // or 'file' for WordPress compatibility
         format: format,  // 'pdf', 'docx', 'xlsx', etc.
         requestId: Date.now()
     }, '*');
 }
 ```
 
+### WordPress Playground Integration
+
+The GitHub Pages version is specifically designed to work as an isolated iframe within WordPress Playground:
+
+```javascript
+// In WordPress
+const converterIframe = document.createElement('iframe');
+converterIframe.src = 'https://yourusername.github.io/document-converter/';
+document.body.appendChild(converterIframe);
+
+// Send file for conversion (supports both 'buffer' and 'file' property names)
+converterIframe.contentWindow.postMessage({
+    type: 'convert',
+    file: arrayBuffer,  // ArrayBuffer of the document
+    format: 'pdf',
+    requestId: 'unique-id'
+}, '*');
+
+// Listen for results
+window.addEventListener('message', (event) => {
+    if (event.data.type === 'result') {
+        const pdfBlob = event.data.blob;
+        // Handle the converted PDF
+    }
+});
+```
+
 ## Security Headers
 
+### Vercel
 The `vercel.json` configuration includes required headers for SharedArrayBuffer support:
 
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp`
 - `Content-Security-Policy` with `frame-ancestors *` to allow embedding
+
+### GitHub Pages
+The `coi-serviceworker.js` Service Worker adds the required headers via fetch interception:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless` as fallback)
+- `Cross-Origin-Resource-Policy: cross-origin`
 
 ## Supported Formats
 
