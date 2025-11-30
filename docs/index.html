@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document Converter - ZetaJS (GitHub Pages)</title>
+    <title>Document Converter - ZetaJS</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
@@ -14,6 +17,12 @@
             min-height: 100vh;
             margin: 0;
             background: #f5f5f5;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
         }
         .status {
             text-align: center;
@@ -51,168 +60,479 @@
             color: #721c24;
             font-size: 14px;
         }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 10px 15px;
+            margin: 10px 0;
+            color: #155724;
+            font-size: 14px;
+        }
+        .info {
+            background: #e8f0fe;
+            border: 1px solid #4285f4;
+            border-radius: 4px;
+            padding: 10px 15px;
+            margin: 10px 0;
+            color: #1a73e8;
+            font-size: 14px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .btn {
+            padding: 12px 24px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            margin: 5px;
+        }
+        .btn-primary {
+            background: #4285f4;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #3367d6;
+        }
+        .btn-secondary {
+            background: #f1f3f4;
+            color: #333;
+        }
+        .btn-secondary:hover {
+            background: #e8eaed;
+        }
+        .result-section {
+            margin-top: 20px;
+        }
+        .preview-frame {
+            width: 100%;
+            height: 60vh;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        /* Iframe mode: minimal UI */
+        body.iframe-mode .container {
+            padding: 20px;
+        }
+        body.iframe-mode h1,
+        body.iframe-mode .subtitle {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <div class="status">
-        <div class="spinner" id="spinner"></div>
-        <p id="statusText">Initializing...</p>
-        <div id="coiWarning" class="warning hidden">
-            Cross-Origin Isolation is not enabled. Activating Service Worker...
+    <div class="container">
+        <h1>Document Converter</h1>
+        <p class="subtitle">Browser-based document conversion powered by LibreOffice WASM</p>
+
+        <div class="status" id="statusSection">
+            <div class="spinner" id="spinner"></div>
+            <p id="statusText">Initializing...</p>
+            <div id="coiWarning" class="warning hidden">
+                Cross-Origin Isolation is not enabled. Activating Service Worker...
+            </div>
+            <div id="autoConvertInfo" class="info hidden"></div>
+            <div id="resultMessage" class="success hidden"></div>
+            <div id="errorMessage" class="error hidden"></div>
+        </div>
+
+        <div class="result-section hidden" id="resultSection">
+            <button class="btn btn-primary" id="downloadBtn">Download</button>
+            <button class="btn btn-secondary" id="previewBtn">Preview</button>
+            <iframe class="preview-frame hidden" id="previewFrame"></iframe>
         </div>
     </div>
 
     <!-- Hidden canvas required by ZetaOffice WASM -->
     <canvas id="qtcanvas" style="display: none"></canvas>
 
-    <!-- 
-        CRITICAL: Load the COI Service Worker FIRST before any other scripts.
-        This enables COOP/COEP headers via Service Worker for GitHub Pages
-        where server headers cannot be configured.
+    <!--
+        =============================================================================
+        URL PARAMETERS FOR AUTOMATIC CONVERSION
+        =============================================================================
+
+        This page supports automatic document conversion via URL parameters.
+        It works both as an iframe-embeddable converter and as a standalone page.
+
+        SUPPORTED PARAMETERS:
+        =====================
+
+        1. Convert from URL (fetch a remote document):
+           ?url=https://example.com/document.docx
+           ?url=https://example.com/document.docx&format=pdf&download=true
+
+        2. Convert from Base64 (inline document data):
+           ?base64=<base64-encoded-data>&name=document.docx
+           ?base64=<base64-encoded-data>&name=document.docx&format=pdf
+
+        PARAMETERS:
+        ===========
+        - url:      URL of the document to fetch and convert (must support CORS)
+        - base64:   Base64-encoded document content
+        - name:     Filename (required with base64, optional with url)
+        - format:   Output format: pdf, docx, xlsx, pptx, odt, ods, odp, html, txt, rtf
+                    Default: pdf
+        - download: If "true", auto-download the result instead of preview
+
+        EXAMPLES:
+        =========
+        Convert a remote DOCX to PDF and preview:
+          index.html?url=https://example.com/report.docx
+
+        Convert a remote file and auto-download:
+          index.html?url=https://example.com/report.docx&download=true
+
+        Convert base64 data to PDF:
+          index.html?base64=UEsDBBQAAAA...&name=document.docx
+
+        Convert to a different format:
+          index.html?url=https://example.com/doc.odt&format=docx
+
+        CORS LIMITATIONS:
+        =================
+        When using the 'url' parameter, the remote server must allow CORS requests.
+        If you get CORS errors, use the 'base64' method instead.
+
+        IFRAME MODE:
+        ============
+        When embedded in an iframe, this page communicates via postMessage:
+
+        Incoming messages:
+          { type: 'convert', buffer: ArrayBuffer, format: string, requestId: string }
+          { type: 'ping', requestId: string }
+
+        Outgoing messages:
+          { type: 'ready' }
+          { type: 'result', blob: Blob, format: string, requestId: string }
+          { type: 'error', error: string, requestId: string }
+          { type: 'pong', ready: boolean, requestId: string }
     -->
+
+    <!-- CRITICAL: Load the COI Service Worker FIRST before any other scripts -->
     <script src="coi-serviceworker.js"></script>
 
     <script>
-        // Check cross-origin isolation status after COI service worker loads
         (function() {
+            // =================================================================
+            // DOM ELEMENTS
+            // =================================================================
             const statusText = document.getElementById('statusText');
+            const spinner = document.getElementById('spinner');
             const coiWarning = document.getElementById('coiWarning');
+            const autoConvertInfo = document.getElementById('autoConvertInfo');
+            const resultMessage = document.getElementById('resultMessage');
+            const errorMessageEl = document.getElementById('errorMessage');
+            const resultSection = document.getElementById('resultSection');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const previewBtn = document.getElementById('previewBtn');
+            const previewFrame = document.getElementById('previewFrame');
 
-            // Store converter module reference for auto-conversion
+            // =================================================================
+            // STATE
+            // =================================================================
             let converterModule = null;
+            let resultBlobUrl = null;
+            let resultFilename = null;
 
-            // Parse URL parameters from hash (for auto-conversion mode)
-            // Format: #file=BASE64_DATA&format=pdf&filename=document.odt
-            function getHashParams() {
-                const hash = window.location.hash.substring(1);
-                if (!hash) return null;
+            // =================================================================
+            // URL PARAMETER PARSING
+            // =================================================================
+            const urlParams = new URLSearchParams(window.location.search);
+            const paramUrl = urlParams.get('url');
+            const paramBase64 = urlParams.get('base64');
+            const paramName = urlParams.get('name');
+            const paramFormat = urlParams.get('format') || 'pdf';
+            const paramDownload = urlParams.get('download') === 'true';
 
-                const params = {};
-                hash.split('&').forEach(function(part) {
-                    const [key, value] = part.split('=');
-                    if (key && value) {
-                        params[decodeURIComponent(key)] = decodeURIComponent(value);
-                    }
-                });
-                return params.file ? params : null;
+            const hasAutoConvert = paramUrl || paramBase64;
+
+            // Detect if we're in an iframe
+            const isIframeMode = window.parent !== window;
+            if (isIframeMode) {
+                document.body.classList.add('iframe-mode');
             }
+
+            // =================================================================
+            // UTILITY FUNCTIONS
+            // =================================================================
 
             function updateStatus(message) {
                 if (statusText) statusText.textContent = message;
             }
 
-            // Auto-convert file from URL hash parameters
-            async function autoConvertFromHash(module, params) {
-                try {
-                    updateStatus('Decoding document...');
+            function showError(message) {
+                errorMessageEl.textContent = message;
+                errorMessageEl.classList.remove('hidden');
+                spinner.classList.add('hidden');
+            }
 
-                    // Decode base64 file data
-                    const binaryString = atob(params.file);
+            function hideError() {
+                errorMessageEl.classList.add('hidden');
+            }
+
+            function showResult(message) {
+                resultMessage.textContent = message;
+                resultMessage.classList.remove('hidden');
+            }
+
+            function getFilenameFromUrl(url) {
+                try {
+                    const urlObj = new URL(url);
+                    const pathname = urlObj.pathname;
+                    const filename = pathname.split('/').pop();
+                    return filename || 'document';
+                } catch (e) {
+                    return 'document';
+                }
+            }
+
+            function getOutputExtension(format) {
+                const extensions = {
+                    'pdf': 'pdf', 'docx': 'docx', 'xlsx': 'xlsx', 'pptx': 'pptx',
+                    'odt': 'odt', 'ods': 'ods', 'odp': 'odp', 'html': 'html',
+                    'txt': 'txt', 'rtf': 'rtf', 'png': 'png', 'jpg': 'jpg'
+                };
+                return extensions[format.toLowerCase()] || 'pdf';
+            }
+
+            function triggerDownload(url, filename) {
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            // =================================================================
+            // CONVERSION FUNCTIONS
+            // =================================================================
+
+            async function waitForReady(module, maxWaitMs = 120000) {
+                const startTime = Date.now();
+                while (!module.isReady()) {
+                    if (Date.now() - startTime > maxWaitMs) {
+                        throw new Error('Converter initialization timeout');
+                    }
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            }
+
+            async function convertArrayBuffer(arrayBuffer, filename, format = 'pdf') {
+                updateStatus('Converting document...');
+
+                const requestId = 'internal_' + Date.now();
+
+                // Create promise to wait for result
+                const resultPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Conversion timeout'));
+                    }, 120000);
+
+                    const handler = (event) => {
+                        if (!event.data || event.data.requestId !== requestId) return;
+
+                        window.removeEventListener('message', handler);
+                        clearTimeout(timeout);
+
+                        if (event.data.type === 'result') {
+                            resolve(event.data);
+                        } else if (event.data.type === 'error') {
+                            reject(new Error(event.data.error));
+                        }
+                    };
+                    window.addEventListener('message', handler);
+                });
+
+                // Trigger conversion via self-postMessage (uses the converter.js message handler)
+                window.postMessage({
+                    type: 'convert',
+                    buffer: arrayBuffer,
+                    format: format,
+                    requestId: requestId
+                }, '*');
+
+                return await resultPromise;
+            }
+
+            async function handleConversionResult(result, filename, format, autoDownload) {
+                if (!result.blob) {
+                    throw new Error('No result blob received');
+                }
+
+                const outputExt = getOutputExtension(format);
+                const outputFilename = filename.replace(/\.[^.]+$/, '.' + outputExt);
+
+                resultBlobUrl = URL.createObjectURL(result.blob);
+                resultFilename = outputFilename;
+
+                spinner.classList.add('hidden');
+
+                if (autoDownload) {
+                    triggerDownload(resultBlobUrl, outputFilename);
+                    showResult('Download started: ' + outputFilename);
+                    updateStatus('Conversion complete!');
+                } else {
+                    // Show result section
+                    downloadBtn.textContent = 'Download ' + outputExt.toUpperCase();
+                    resultSection.classList.remove('hidden');
+                    showResult('Conversion complete: ' + outputFilename);
+                    updateStatus('Ready');
+
+                    // If PDF, show preview automatically
+                    if (format === 'pdf') {
+                        previewFrame.src = resultBlobUrl;
+                        previewFrame.classList.remove('hidden');
+                    }
+                }
+            }
+
+            async function convertFromUrl(url, format, autoDownload) {
+                const filename = paramName || getFilenameFromUrl(url);
+
+                updateStatus('Fetching document...');
+                autoConvertInfo.textContent = 'Fetching: ' + url;
+                autoConvertInfo.classList.remove('hidden');
+
+                try {
+                    const response = await fetch(url, {
+                        mode: 'cors',
+                        credentials: 'omit'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                    }
+
+                    const arrayBuffer = await response.arrayBuffer();
+                    autoConvertInfo.textContent = 'Converting: ' + filename;
+
+                    await waitForReady(converterModule);
+                    const result = await convertArrayBuffer(arrayBuffer, filename, format);
+                    await handleConversionResult(result, filename, format, autoDownload);
+
+                    autoConvertInfo.classList.add('hidden');
+                } catch (err) {
+                    let errorMsg = err.message;
+                    if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
+                        errorMsg = 'CORS error: The remote server does not allow cross-origin requests. ' +
+                                   'Try using the base64 parameter instead.';
+                    }
+                    showError('Failed: ' + errorMsg);
+                    autoConvertInfo.classList.add('hidden');
+                }
+            }
+
+            async function convertFromBase64(base64Data, filename, format, autoDownload) {
+                if (!filename) {
+                    showError('Missing "name" parameter. When using base64, you must specify the filename.');
+                    return;
+                }
+
+                updateStatus('Decoding document...');
+                autoConvertInfo.textContent = 'Processing: ' + filename;
+                autoConvertInfo.classList.remove('hidden');
+
+                try {
+                    const binaryString = atob(base64Data);
                     const bytes = new Uint8Array(binaryString.length);
                     for (let i = 0; i < binaryString.length; i++) {
                         bytes[i] = binaryString.charCodeAt(i);
                     }
                     const arrayBuffer = bytes.buffer;
 
-                    const format = params.format || 'pdf';
-                    const action = params.action || 'preview'; // preview or download
+                    autoConvertInfo.textContent = 'Converting: ' + filename;
 
-                    updateStatus('Converting to ' + format.toUpperCase() + '...');
+                    await waitForReady(converterModule);
+                    const result = await convertArrayBuffer(arrayBuffer, filename, format);
+                    await handleConversionResult(result, filename, format, autoDownload);
 
-                    // Wait for module to be ready
-                    let attempts = 0;
-                    while (!module.isReady() && attempts < 120) {
-                        await new Promise(r => setTimeout(r, 1000));
-                        attempts++;
-                    }
-
-                    if (!module.isReady()) {
-                        throw new Error('Converter initialization timeout');
-                    }
-
-                    // Convert document using internal API
-                    const requestId = 'auto_' + Date.now();
-
-                    // Set up result listener
-                    const resultPromise = new Promise((resolve, reject) => {
-                        const timeout = setTimeout(() => reject(new Error('Conversion timeout')), 120000);
-
-                        const handler = (event) => {
-                            if (event.data.requestId !== requestId) return;
-
-                            window.removeEventListener('message', handler);
-                            clearTimeout(timeout);
-
-                            if (event.data.type === 'result') {
-                                resolve(event.data);
-                            } else if (event.data.type === 'error') {
-                                reject(new Error(event.data.error));
-                            }
-                        };
-                        window.addEventListener('message', handler);
-                    });
-
-                    // Trigger conversion via internal postMessage
-                    window.postMessage({
-                        type: 'convert',
-                        buffer: arrayBuffer,
-                        format: format,
-                        requestId: requestId
-                    }, '*');
-
-                    // Wait for result
-                    const result = await resultPromise;
-
-                    updateStatus('Conversion complete!');
-                    document.getElementById('spinner').classList.add('hidden');
-
-                    // Handle result based on action
-                    if (result.blob) {
-                        const blobUrl = URL.createObjectURL(result.blob);
-
-                        if (action === 'preview' && format === 'pdf') {
-                            // Replace page content with PDF viewer
-                            window.location.href = blobUrl;
-                        } else {
-                            // Trigger download
-                            const filename = params.filename || ('document.' + format);
-                            const a = document.createElement('a');
-                            a.href = blobUrl;
-                            a.download = filename.replace(/\.[^.]+$/, '.' + format);
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-
-                            updateStatus('Download started! You can close this tab.');
-                        }
-                    }
-
-                } catch (error) {
-                    console.error('Auto-conversion error:', error);
-                    updateStatus('Error: ' + error.message);
-                    document.getElementById('spinner').classList.add('hidden');
-
-                    // Show error in UI
-                    coiWarning.textContent = 'Conversion failed: ' + error.message;
-                    coiWarning.classList.remove('hidden');
-                    coiWarning.classList.add('error');
+                    autoConvertInfo.classList.add('hidden');
+                } catch (err) {
+                    showError('Failed: ' + err.message);
+                    autoConvertInfo.classList.add('hidden');
                 }
             }
 
-            // Wait a moment for service worker to potentially trigger a reload
+            // =================================================================
+            // EVENT HANDLERS
+            // =================================================================
+
+            downloadBtn.addEventListener('click', function() {
+                if (resultBlobUrl && resultFilename) {
+                    triggerDownload(resultBlobUrl, resultFilename);
+                }
+            });
+
+            previewBtn.addEventListener('click', function() {
+                if (resultBlobUrl) {
+                    if (previewFrame.classList.contains('hidden')) {
+                        previewFrame.src = resultBlobUrl;
+                        previewFrame.classList.remove('hidden');
+                        previewBtn.textContent = 'Hide Preview';
+                    } else {
+                        previewFrame.classList.add('hidden');
+                        previewBtn.textContent = 'Preview';
+                    }
+                }
+            });
+
+            // =================================================================
+            // INITIALIZATION
+            // =================================================================
+
+            function loadConverter() {
+                coiWarning.classList.add('hidden');
+                updateStatus('Loading converter module...');
+
+                import('./converter.js')
+                    .then(function(module) {
+                        converterModule = module;
+                        return module.initZetaJS();
+                    })
+                    .then(function() {
+                        // Start auto-conversion if parameters present
+                        if (paramUrl) {
+                            convertFromUrl(paramUrl, paramFormat, paramDownload);
+                        } else if (paramBase64) {
+                            convertFromBase64(paramBase64, paramName, paramFormat, paramDownload);
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Failed to load converter:', error);
+                        showError('Failed to load converter: ' + error.message);
+
+                        if (isIframeMode) {
+                            window.parent.postMessage({
+                                type: 'error',
+                                error: 'Failed to load converter: ' + error.message
+                            }, '*');
+                        }
+                    });
+            }
+
+            // Check COI and start
             setTimeout(function() {
                 if (!window.crossOriginIsolated) {
                     coiWarning.classList.remove('hidden');
                     updateStatus('Waiting for Cross-Origin Isolation...');
 
-                    // If still not isolated after service worker should have activated,
-                    // show an error but try to continue anyway
                     setTimeout(function() {
                         if (!window.crossOriginIsolated) {
-                            console.warn('Cross-Origin Isolation could not be enabled. SharedArrayBuffer may not work.');
+                            console.warn('Cross-Origin Isolation could not be enabled.');
                             coiWarning.textContent = 'Warning: Cross-Origin Isolation could not be enabled. ' +
                                 'Some features may not work correctly.';
-                            // Continue anyway - the converter will show its own error if it fails
                             loadConverter();
                         }
                     }, 3000);
@@ -222,38 +542,10 @@
                 }
             }, 100);
 
-            function loadConverter() {
-                coiWarning.classList.add('hidden');
-                updateStatus('Loading converter module...');
-
-                // Dynamically import the converter module
-                import('./converter.js')
-                    .then(function(module) {
-                        converterModule = module;
-
-                        // Initialize ZetaJS
-                        return module.initZetaJS().then(function() {
-                            // Check if we have auto-conversion parameters
-                            const hashParams = getHashParams();
-                            if (hashParams) {
-                                console.log('Auto-conversion mode detected');
-                                autoConvertFromHash(module, hashParams);
-                            }
-                        });
-                    })
-                    .catch(function(error) {
-                        console.error('Failed to load converter:', error);
-                        updateStatus('Error: ' + error.message);
-                        document.getElementById('spinner').classList.add('hidden');
-
-                        // Notify parent of error
-                        if (window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'error',
-                                error: 'Failed to load converter: ' + error.message
-                            }, '*');
-                        }
-                    });
+            // Show auto-convert info if applicable
+            if (hasAutoConvert) {
+                autoConvertInfo.textContent = 'Waiting for converter to initialize...';
+                autoConvertInfo.classList.remove('hidden');
             }
         })();
     </script>

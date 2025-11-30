@@ -49,6 +49,100 @@ GitHub Pages deployment uses a GitHub Actions workflow to:
 
 ## Usage
 
+### Direct URL Conversion (No Code Required)
+
+You can convert documents directly via URL parameters without writing any code. This works on both `index.html` and `example.html`.
+
+#### Convert from a Remote URL
+
+```
+https://yourusername.github.io/document-converter/?url=https://example.com/document.docx
+```
+
+With auto-download:
+```
+https://yourusername.github.io/document-converter/?url=https://example.com/document.docx&download=true
+```
+
+Convert to a different format:
+```
+https://yourusername.github.io/document-converter/?url=https://example.com/document.odt&format=docx
+```
+
+#### Convert from Base64 Data
+
+For documents that can't be fetched via URL (due to CORS restrictions), you can pass the file content as Base64:
+
+```
+https://yourusername.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx
+```
+
+With format and auto-download:
+```
+https://yourusername.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx&format=pdf&download=true
+```
+
+#### URL Parameters Reference
+
+| Parameter | Description | Required | Default |
+|-----------|-------------|----------|---------|
+| `url` | URL of the document to fetch and convert | Yes* | - |
+| `base64` | Base64-encoded document content | Yes* | - |
+| `name` | Filename (required with base64, optional with url) | Conditional | Extracted from URL |
+| `format` | Output format: pdf, docx, xlsx, pptx, odt, ods, odp, html, txt, rtf | No | `pdf` |
+| `download` | If "true", auto-download instead of preview | No | `false` |
+
+*Either `url` or `base64` must be provided, but not both.
+
+#### CORS Limitations
+
+When using the `url` parameter, the remote server must allow CORS (Cross-Origin Resource Sharing) requests. If you get CORS errors:
+
+1. **Use Base64**: Encode your file as Base64 and use the `base64` parameter
+2. **Same-origin hosting**: Host your files on the same domain as the converter
+3. **CORS proxy**: Use a CORS proxy server (for development only)
+
+#### Example: Generate Conversion Link in JavaScript
+
+```javascript
+// Convert a file to Base64 and generate a conversion URL
+async function getConversionUrl(file, format = 'pdf', autoDownload = false) {
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+
+    const params = new URLSearchParams({
+        base64: base64,
+        name: file.name,
+        format: format
+    });
+
+    if (autoDownload) {
+        params.set('download', 'true');
+    }
+
+    return `https://yourusername.github.io/document-converter/?${params.toString()}`;
+}
+
+// Usage
+const file = document.querySelector('input[type="file"]').files[0];
+const url = await getConversionUrl(file, 'pdf', true);
+window.open(url, '_blank');
+```
+
+### Interactive Demo Page
+
+The `example.html` page provides a full-featured interface with:
+- Drag-and-drop file upload
+- Format selection
+- PDF preview
+- Download button
+- URL parameter support (same as above)
+
+Access it at:
+```
+https://yourusername.github.io/document-converter/example.html
+```
+
 ### Embedding in an iframe
 
 **Vercel deployment:**
