@@ -79,6 +79,40 @@ For documents that can't be fetched via URL (due to CORS restrictions), you can 
 
 **Example** (text file to PDF): <a href="https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt" target="_blank">https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt</a>
 
+#### Convert via HTTP POST
+
+You can upload files directly via HTTP POST from external websites. The Service Worker intercepts the POST request and processes the file.
+
+```html
+<!-- Simple form -->
+<form action="https://erseco.github.io/document-converter/" method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <button type="submit">Convert to PDF</button>
+</form>
+
+<!-- With options -->
+<form action="https://erseco.github.io/document-converter/" method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <select name="format">
+        <option value="pdf">PDF</option>
+        <option value="docx">DOCX</option>
+        <option value="odt">ODT</option>
+    </select>
+    <label><input type="checkbox" name="fullscreen" value="true"> Fullscreen</label>
+    <label><input type="checkbox" name="download" value="true"> Auto-download</label>
+    <button type="submit">Convert</button>
+</form>
+```
+
+**POST Parameters:**
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| `file` | The file to convert (multipart/form-data) | Yes |
+| `format` | Output format (pdf, docx, xlsx, etc.) | No (default: pdf) |
+| `fullscreen` | Set to "true" for fullscreen PDF view | No |
+| `download` | Set to "true" for auto-download | No |
+
 #### URL Parameters Reference
 
 | Parameter | Description | Required | Default |

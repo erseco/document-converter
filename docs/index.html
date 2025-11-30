@@ -257,9 +257,12 @@
             const paramFullscreen = urlParams.get('fullscreen') === 'true';
             // New: receive mode - wait for data from opener window via postMessage
             const paramReceive = urlParams.get('receive'); // 'opener' = wait for opener
+            // POST data mode - data uploaded via POST form
+            const paramPostData = urlParams.get('postData') === 'true';
 
             const hasAutoConvert = paramUrl || paramBase64;
             const waitForOpener = paramReceive === 'opener';
+            const waitForPostData = paramPostData;
 
             // Detect if we're in an iframe
             const isIframeMode = window.parent !== window;
@@ -487,6 +490,71 @@
             }
 
             // =================================================================
+            // POST DATA MODE: Receive file uploaded via POST form
+            // =================================================================
+            // This mode handles files uploaded via HTTP POST through the Service Worker.
+            // The Service Worker intercepts the POST, stores the file, and redirects here.
+
+            async function handlePostData() {
+                if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
+                    showError('Service Worker not available. Please reload the page.');
+                    return;
+                }
+
+                updateStatus('Retrieving uploaded file...');
+                autoConvertInfo.textContent = 'Processing POST data...';
+                autoConvertInfo.classList.remove('hidden');
+
+                return new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Timeout waiting for POST data'));
+                    }, 10000);
+
+                    const handler = (event) => {
+                        if (event.data && event.data.type === 'postData') {
+                            navigator.serviceWorker.removeEventListener('message', handler);
+                            clearTimeout(timeout);
+
+                            if (event.data.data) {
+                                resolve(event.data.data);
+                            } else {
+                                reject(new Error('No POST data available'));
+                            }
+                        }
+                    };
+
+                    navigator.serviceWorker.addEventListener('message', handler);
+                    navigator.serviceWorker.controller.postMessage({ type: 'getPostData' });
+                });
+            }
+
+            async function convertFromPostData() {
+                try {
+                    const postData = await handlePostData();
+
+                    const arrayBuffer = postData.buffer;
+                    const filename = postData.filename || 'document';
+                    const format = postData.format || 'pdf';
+                    const autoDownload = postData.download || false;
+                    const fullscreen = postData.fullscreen || false;
+
+                    autoConvertInfo.textContent = 'Converting: ' + filename;
+
+                    await waitForReady(converterModule);
+                    const result = await convertArrayBuffer(arrayBuffer, filename, format);
+                    await handleConversionResult(result, filename, format, autoDownload, fullscreen);
+
+                    autoConvertInfo.classList.add('hidden');
+
+                    // Clean up URL
+                    history.replaceState(null, '', window.location.pathname);
+                } catch (err) {
+                    showError('Failed: ' + err.message);
+                    autoConvertInfo.classList.add('hidden');
+                }
+            }
+
+            // =================================================================
             // OPENER MODE: Receive file from window.opener via postMessage
             // =================================================================
             // This mode is used when the file is too large for URL parameters.
@@ -601,7 +669,10 @@
                     })
                     .then(function() {
                         // Start auto-conversion if parameters present
-                        if (waitForOpener) {
+                        if (waitForPostData) {
+                            // POST mode: file uploaded via POST form
+                            convertFromPostData();
+                        } else if (waitForOpener) {
                             // Opener mode: wait for document via postMessage
                             setupOpenerMode();
                         } else if (paramUrl) {
@@ -644,7 +715,7 @@
             }, 100);
 
             // Show auto-convert info if applicable
-            if (hasAutoConvert || waitForOpener) {
+            if (hasAutoConvert || waitForOpener || waitForPostData) {
                 autoConvertInfo.textContent = 'Waiting for converter to initialize...';
                 autoConvertInfo.classList.remove('hidden');
             }

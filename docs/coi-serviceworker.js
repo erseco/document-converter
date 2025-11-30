@@ -2,12 +2,18 @@
 /*
  * This Service Worker enables Cross-Origin Isolation for environments
  * where server headers cannot be configured (like GitHub Pages).
- * 
+ *
  * It intercepts all fetch requests and adds the necessary COOP/COEP headers
  * to enable SharedArrayBuffer support required by ZetaJS/LibreOffice WASM.
+ *
+ * Extended to support POST requests for file upload conversion.
  */
 
 let coepCredentialless = false;
+
+// Storage for POST data (in-memory, cleared after retrieval)
+let pendingPostData = null;
+
 if (typeof window === 'undefined') {
     self.addEventListener("install", () => self.skipWaiting());
     self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
@@ -26,11 +32,23 @@ if (typeof window === 'undefined') {
                 });
         } else if (ev.data.type === "coepCredentialless") {
             coepCredentialless = ev.data.value;
+        } else if (ev.data.type === "getPostData") {
+            // Client is requesting the POST data
+            const data = pendingPostData;
+            pendingPostData = null; // Clear after retrieval
+            ev.source.postMessage({ type: "postData", data: data });
         }
     });
 
     self.addEventListener("fetch", function (event) {
         const r = event.request;
+
+        // Handle POST requests to the main page
+        if (r.method === "POST" && (r.url.endsWith("/") || r.url.endsWith("/index.html") || r.url.includes("document-converter"))) {
+            event.respondWith(handlePostRequest(r));
+            return;
+        }
+
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
         }
@@ -65,6 +83,64 @@ if (typeof window === 'undefined') {
                 .catch((e) => console.error(e))
         );
     });
+
+    // Handle POST request: extract file and redirect to page with postData flag
+    async function handlePostRequest(request) {
+        try {
+            const formData = await request.formData();
+            const file = formData.get("file");
+            const format = formData.get("format") || "pdf";
+            const download = formData.get("download") === "true";
+            const fullscreen = formData.get("fullscreen") === "true";
+
+            if (file && file instanceof File) {
+                const arrayBuffer = await file.arrayBuffer();
+
+                // Store the data for retrieval by the page
+                pendingPostData = {
+                    buffer: arrayBuffer,
+                    filename: file.name,
+                    format: format,
+                    download: download,
+                    fullscreen: fullscreen
+                };
+
+                // Redirect to the page with a flag indicating POST data is available
+                const url = new URL(request.url);
+                url.search = "?postData=true";
+
+                // Fetch the actual page and return it
+                const pageResponse = await fetch(url.pathname);
+                const pageText = await pageResponse.text();
+
+                const newHeaders = new Headers(pageResponse.headers);
+                newHeaders.set("Cross-Origin-Embedder-Policy",
+                    coepCredentialless ? "credentialless" : "require-corp"
+                );
+                newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+                newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
+                newHeaders.set("Content-Type", "text/html");
+
+                // Inject a script to add postData=true to the URL
+                const modifiedHtml = pageText.replace(
+                    '</head>',
+                    `<script>if(!window.location.search.includes('postData'))history.replaceState(null,'','?postData=true');</script></head>`
+                );
+
+                return new Response(modifiedHtml, {
+                    status: 200,
+                    statusText: "OK",
+                    headers: newHeaders,
+                });
+            } else {
+                // No file provided, redirect to normal page
+                return Response.redirect(request.url.split('?')[0], 302);
+            }
+        } catch (e) {
+            console.error("Error handling POST:", e);
+            return Response.redirect(request.url.split('?')[0], 302);
+        }
+    }
 
 } else {
     (() => {
