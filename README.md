@@ -79,39 +79,56 @@ For documents that can't be fetched via URL (due to CORS restrictions), you can 
 
 **Example** (text file to PDF): <a href="https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt" target="_blank">https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt</a>
 
-#### Convert via HTTP POST
+#### Convert via Form Upload (from external websites)
 
-You can upload files directly via HTTP POST from external websites. The Service Worker intercepts the POST request and processes the file.
+You can embed a conversion form on any website. Since GitHub Pages doesn't accept POST requests, we use JavaScript to open the converter and send the file via `postMessage`.
 
 ```html
-<!-- Simple form -->
-<form action="https://erseco.github.io/document-converter/" method="POST" enctype="multipart/form-data">
-    <input type="file" name="file" required>
-    <button type="submit">Convert to PDF</button>
-</form>
-
-<!-- With options -->
-<form action="https://erseco.github.io/document-converter/" method="POST" enctype="multipart/form-data">
-    <input type="file" name="file" required>
-    <select name="format">
+<!-- Conversion form for external websites -->
+<form id="convertForm">
+    <input type="file" id="fileInput" required>
+    <select id="formatSelect">
         <option value="pdf">PDF</option>
         <option value="docx">DOCX</option>
         <option value="odt">ODT</option>
     </select>
-    <label><input type="checkbox" name="fullscreen" value="true"> Fullscreen</label>
-    <label><input type="checkbox" name="download" value="true"> Auto-download</label>
+    <label><input type="checkbox" id="fullscreenCheck"> Fullscreen</label>
     <button type="submit">Convert</button>
 </form>
+
+<script>
+document.getElementById('convertForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const file = document.getElementById('fileInput').files[0];
+    if (!file) return alert('Please select a file');
+
+    const format = document.getElementById('formatSelect').value;
+    const fullscreen = document.getElementById('fullscreenCheck').checked;
+
+    // Open converter in new window with receiver mode
+    const converterUrl = 'https://erseco.github.io/document-converter/?receive=opener';
+    const win = window.open(converterUrl, '_blank');
+
+    // Wait for converter to signal it's ready
+    window.addEventListener('message', async function handler(event) {
+        if (event.data.type === 'converterReady') {
+            window.removeEventListener('message', handler);
+
+            // Send the file to the converter
+            const buffer = await file.arrayBuffer();
+            win.postMessage({
+                type: 'convertDocument',
+                buffer: buffer,
+                name: file.name,
+                format: format,
+                fullscreen: fullscreen
+            }, '*');
+        }
+    });
+});
+</script>
 ```
-
-**POST Parameters:**
-
-| Parameter | Description | Required |
-|-----------|-------------|----------|
-| `file` | The file to convert (multipart/form-data) | Yes |
-| `format` | Output format (pdf, docx, xlsx, etc.) | No (default: pdf) |
-| `fullscreen` | Set to "true" for fullscreen PDF view | No |
-| `download` | Set to "true" for auto-download | No |
 
 #### URL Parameters Reference
 

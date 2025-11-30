@@ -219,6 +219,78 @@
           { type: 'pong', ready: boolean, requestId: string }
     -->
 
+    <!--
+        EARLY OPENER CAPTURE: Must run BEFORE coi-serviceworker.js
+        This script captures documents sent via postMessage from window.opener
+        BEFORE the Service Worker reloads the page (which enables COOP and blocks opener).
+        The document is stored in sessionStorage and processed after COI is enabled.
+    -->
+    <script>
+    (function() {
+        const params = new URLSearchParams(window.location.search);
+        const receiveMode = params.get('receive');
+
+        // Only run in opener receive mode
+        if (receiveMode !== 'opener') return;
+
+        // Check if we already have stored data (post-reload)
+        const storedData = sessionStorage.getItem('pendingConversion');
+        if (storedData) {
+            console.log('Converter: Found stored conversion data from pre-COI phase');
+            return; // Data already captured, let main script handle it
+        }
+
+        // Check if opener is available (pre-COI phase)
+        if (!window.opener) {
+            console.log('Converter: No opener available (probably post-COI reload)');
+            return;
+        }
+
+        console.log('Converter: Setting up early opener capture (pre-COI phase)');
+
+        // Set up message listener to capture document before SW reload
+        const earlyHandler = function(event) {
+            if (!event.data || event.data.type !== 'convertDocument') return;
+
+            console.log('Converter: Received document in pre-COI phase, storing...');
+
+            // Convert ArrayBuffer to base64 for sessionStorage
+            const buffer = event.data.buffer;
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+
+            // Store in sessionStorage (survives reload)
+            const conversionData = {
+                base64: base64,
+                name: event.data.name || 'document',
+                format: event.data.format || params.get('format') || 'pdf',
+                download: event.data.download !== undefined ? event.data.download : params.get('download') === 'true',
+                fullscreen: event.data.fullscreen !== undefined ? event.data.fullscreen : params.get('fullscreen') === 'true'
+            };
+
+            sessionStorage.setItem('pendingConversion', JSON.stringify(conversionData));
+            console.log('Converter: Document stored in sessionStorage');
+
+            // Notify opener that we received the document
+            if (window.opener) {
+                window.opener.postMessage({ type: 'documentReceived', success: true }, '*');
+            }
+
+            window.removeEventListener('message', earlyHandler);
+        };
+
+        window.addEventListener('message', earlyHandler);
+
+        // Signal to opener that we're ready to receive (pre-COI)
+        console.log('Converter: Signaling opener that we are ready (pre-COI)');
+        window.opener.postMessage({ type: 'converterReady', preCOI: true }, '*');
+    })();
+    </script>
+
     <!-- CRITICAL: Load the COI Service Worker FIRST before any other scripts -->
     <script src="coi-serviceworker.js"></script>
 
@@ -257,12 +329,9 @@
             const paramFullscreen = urlParams.get('fullscreen') === 'true';
             // New: receive mode - wait for data from opener window via postMessage
             const paramReceive = urlParams.get('receive'); // 'opener' = wait for opener
-            // POST data mode - data uploaded via POST form
-            const paramPostData = urlParams.get('postData') === 'true';
 
             const hasAutoConvert = paramUrl || paramBase64;
             const waitForOpener = paramReceive === 'opener';
-            const waitForPostData = paramPostData;
 
             // Detect if we're in an iframe
             const isIframeMode = window.parent !== window;
@@ -490,71 +559,6 @@
             }
 
             // =================================================================
-            // POST DATA MODE: Receive file uploaded via POST form
-            // =================================================================
-            // This mode handles files uploaded via HTTP POST through the Service Worker.
-            // The Service Worker intercepts the POST, stores the file, and redirects here.
-
-            async function handlePostData() {
-                if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
-                    showError('Service Worker not available. Please reload the page.');
-                    return;
-                }
-
-                updateStatus('Retrieving uploaded file...');
-                autoConvertInfo.textContent = 'Processing POST data...';
-                autoConvertInfo.classList.remove('hidden');
-
-                return new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Timeout waiting for POST data'));
-                    }, 10000);
-
-                    const handler = (event) => {
-                        if (event.data && event.data.type === 'postData') {
-                            navigator.serviceWorker.removeEventListener('message', handler);
-                            clearTimeout(timeout);
-
-                            if (event.data.data) {
-                                resolve(event.data.data);
-                            } else {
-                                reject(new Error('No POST data available'));
-                            }
-                        }
-                    };
-
-                    navigator.serviceWorker.addEventListener('message', handler);
-                    navigator.serviceWorker.controller.postMessage({ type: 'getPostData' });
-                });
-            }
-
-            async function convertFromPostData() {
-                try {
-                    const postData = await handlePostData();
-
-                    const arrayBuffer = postData.buffer;
-                    const filename = postData.filename || 'document';
-                    const format = postData.format || 'pdf';
-                    const autoDownload = postData.download || false;
-                    const fullscreen = postData.fullscreen || false;
-
-                    autoConvertInfo.textContent = 'Converting: ' + filename;
-
-                    await waitForReady(converterModule);
-                    const result = await convertArrayBuffer(arrayBuffer, filename, format);
-                    await handleConversionResult(result, filename, format, autoDownload, fullscreen);
-
-                    autoConvertInfo.classList.add('hidden');
-
-                    // Clean up URL
-                    history.replaceState(null, '', window.location.pathname);
-                } catch (err) {
-                    showError('Failed: ' + err.message);
-                    autoConvertInfo.classList.add('hidden');
-                }
-            }
-
-            // =================================================================
             // OPENER MODE: Receive file from window.opener via postMessage
             // =================================================================
             // This mode is used when the file is too large for URL parameters.
@@ -562,9 +566,50 @@
 
             let openerMessageHandler = null;
 
-            function setupOpenerMode() {
+            async function setupOpenerMode() {
+                // First, check if we have data stored from pre-COI capture
+                const storedData = sessionStorage.getItem('pendingConversion');
+                if (storedData) {
+                    console.log('Found stored conversion data from pre-COI phase');
+                    sessionStorage.removeItem('pendingConversion');
+
+                    try {
+                        const data = JSON.parse(storedData);
+
+                        // Convert base64 back to ArrayBuffer
+                        const binaryString = atob(data.base64);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        const arrayBuffer = bytes.buffer;
+
+                        const filename = data.name || 'document';
+                        const format = data.format || 'pdf';
+                        const autoDownload = data.download || false;
+                        const fullscreen = data.fullscreen || false;
+
+                        autoConvertInfo.textContent = 'Converting: ' + filename;
+                        autoConvertInfo.classList.remove('hidden');
+
+                        await waitForReady(converterModule);
+                        const result = await convertArrayBuffer(arrayBuffer, filename, format);
+                        await handleConversionResult(result, filename, format, autoDownload, fullscreen);
+
+                        autoConvertInfo.classList.add('hidden');
+
+                        // Clean up URL
+                        history.replaceState(null, '', window.location.pathname);
+                    } catch (err) {
+                        showError('Failed: ' + err.message);
+                        autoConvertInfo.classList.add('hidden');
+                    }
+                    return;
+                }
+
+                // No stored data - opener mode requires window.opener
                 if (!window.opener) {
-                    showError('This page was opened in "receive from opener" mode, but no opener window found.');
+                    showError('This page was opened in "receive from opener" mode, but no opener window found. The document may not have been sent in time before page reload.');
                     return;
                 }
 
@@ -669,10 +714,7 @@
                     })
                     .then(function() {
                         // Start auto-conversion if parameters present
-                        if (waitForPostData) {
-                            // POST mode: file uploaded via POST form
-                            convertFromPostData();
-                        } else if (waitForOpener) {
+                        if (waitForOpener) {
                             // Opener mode: wait for document via postMessage
                             setupOpenerMode();
                         } else if (paramUrl) {
@@ -715,7 +757,7 @@
             }, 100);
 
             // Show auto-convert info if applicable
-            if (hasAutoConvert || waitForOpener || waitForPostData) {
+            if (hasAutoConvert || waitForOpener) {
                 autoConvertInfo.textContent = 'Waiting for converter to initialize...';
                 autoConvertInfo.classList.remove('hidden');
             }
