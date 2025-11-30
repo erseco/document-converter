@@ -270,7 +270,22 @@ export async function initZetaJS() {
             blockPageScroll: false
         });
 
-        // Set up message handler BEFORE starting
+        let threadInjected = false;
+
+        // Function to inject our thread script
+        const injectThreadScript = () => {
+            if (threadInjected || !zHM.thrPort) return;
+            threadInjected = true;
+
+            console.log('converter.js: Injecting thread script');
+            zHM.thrPort.postMessage({
+                cmd: 'ZetaHelper::run_thr_script',
+                threadJs: createOfficeThreadBlob(),
+                threadJsType: 'module'
+            });
+        };
+
+        // Set up message handler
         const setupMessageHandler = () => {
             if (!zHM.thrPort) {
                 // thrPort not ready yet, try again
@@ -281,23 +296,30 @@ export async function initZetaJS() {
             zHM.thrPort.onmessage = (e) => {
                 switch (e.data.cmd) {
                     case 'ZetaHelper::thr_started':
-                        // Now inject our conversion logic
-                        zHM.thrPort.postMessage({
-                            cmd: 'ZetaHelper::run_thr_script',
-                            threadJs: createOfficeThreadBlob(),
-                            threadJsType: 'module'
-                        });
+                        // Inject our conversion logic
+                        injectThreadScript();
                         break;
                     default:
                         handleWorkerMessage(e);
                 }
             };
+
+            // Also try to inject after a delay in case we missed the message
+            setTimeout(() => {
+                if (!threadInjected && zHM.thrPort) {
+                    console.log('converter.js: Late injection of thread script');
+                    injectThreadScript();
+                }
+            }, 2000);
         };
 
-        // Start ZetaOffice and setup handler
+        // Start ZetaOffice and setup handler immediately
         zHM.start(() => {
             setupMessageHandler();
         });
+
+        // Also setup handler immediately in case start() callback is delayed
+        setupMessageHandler();
 
         return true;
     } catch (error) {
