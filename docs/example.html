@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Converter - Example</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <!-- CRITICAL: Load COI Service Worker FIRST to enable SharedArrayBuffer -->
+    <script src="coi-serviceworker.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -450,12 +453,31 @@
             setStatus('ready', 'Converter ready - Drop a file to convert');
         });
 
-        // Initialize - wait for converter to be ready
-        setTimeout(() => {
-            if (!isReady) {
-                setStatus('loading', 'Loading LibreOffice WASM (~150MB)... This may take a while.');
+        // Check for Cross-Origin Isolation
+        function checkCOI() {
+            if (!window.crossOriginIsolated) {
+                setStatus('loading', 'Enabling Cross-Origin Isolation...');
+                // The service worker should reload the page automatically
+                // If not, show a message after 5 seconds
+                setTimeout(() => {
+                    if (!window.crossOriginIsolated) {
+                        setStatus('error', 'Cross-Origin Isolation failed. Try refreshing the page.');
+                        showError('SharedArrayBuffer is not available. The converter requires Cross-Origin Isolation to work. Please refresh the page or try a different browser.');
+                    }
+                }, 5000);
+                return false;
             }
-        }, 2000);
+            return true;
+        }
+
+        // Initialize - check COI and wait for converter to be ready
+        if (checkCOI()) {
+            setTimeout(() => {
+                if (!isReady) {
+                    setStatus('loading', 'Loading LibreOffice WASM (~150MB)... This may take a while.');
+                }
+            }, 2000);
+        }
     </script>
 </body>
 </html>
