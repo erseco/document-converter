@@ -61,15 +61,15 @@ https://erseco.github.io/document-converter/?url=https://example.com/document.do
 
 **Working examples** (using GitHub raw files which allow CORS):
 
-- DOCX to PDF: [https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx](https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx)
+- DOCX to PDF: <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx</a>
 
-- ODT to PDF: [https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt](https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt)
+- ODT to PDF: <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt</a>
 
-- XLSX to PDF: [https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sc/qa/unit/data/xlsx/pivottable_bool_field_filter.xlsx](https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sc/qa/unit/data/xlsx/pivottable_bool_field_filter.xlsx)
+- XLSX to PDF: <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sc/qa/unit/data/xlsx/pivottable_bool_field_filter.xlsx" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sc/qa/unit/data/xlsx/pivottable_bool_field_filter.xlsx</a>
 
-With auto-download: [https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx&download=true](https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx&download=true)
+With auto-download: <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx&download=true" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/essepuntato/rash/master/documentation/rash-in-docx-simplified.docx&download=true</a>
 
-Convert to a different format (ODT to DOCX): [https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx](https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx)
+Convert to a different format (ODT to DOCX): <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx</a>
 
 #### Convert from Base64 Data
 
