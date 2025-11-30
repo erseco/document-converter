@@ -132,6 +132,162 @@ window.addEventListener('message', (event) => {
 });
 ```
 
+### Complete JavaScript Client Class
+
+For production use, here's a robust wrapper class with error handling and timeouts:
+
+```javascript
+class DocumentConverterClient {
+    constructor(iframeElement) {
+        this.iframe = iframeElement;
+        this.requestMap = new Map();
+        this.isReady = false;
+        this._initMessageListener();
+    }
+
+    _initMessageListener() {
+        window.addEventListener('message', (event) => {
+            const { type, requestId, blob, format, error, ready } = event.data;
+
+            if (type === 'ready') {
+                this.isReady = true;
+                return;
+            }
+
+            if (type === 'pong') {
+                this.isReady = ready;
+                return;
+            }
+
+            if (requestId && this.requestMap.has(requestId)) {
+                const { resolve, reject, timeoutId } = this.requestMap.get(requestId);
+                clearTimeout(timeoutId);
+
+                if (type === 'result') {
+                    resolve({ blob, format });
+                } else if (type === 'error') {
+                    reject(new Error(error));
+                }
+
+                this.requestMap.delete(requestId);
+            }
+        });
+    }
+
+    /**
+     * Wait for the converter to be ready
+     * @param {number} timeout - Maximum wait time in milliseconds
+     * @returns {Promise<void>}
+     */
+    waitForReady(timeout = 30000) {
+        return new Promise((resolve, reject) => {
+            if (this.isReady) {
+                resolve();
+                return;
+            }
+
+            const startTime = Date.now();
+            const checkInterval = setInterval(() => {
+                if (this.isReady) {
+                    clearInterval(checkInterval);
+                    resolve();
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    reject(new Error('Converter initialization timeout'));
+                }
+            }, 100);
+        });
+    }
+
+    /**
+     * Convert a document to the specified format
+     * @param {ArrayBuffer} arrayBuffer - Document content as ArrayBuffer
+     * @param {string} format - Target format (pdf, docx, xlsx, etc.)
+     * @param {number} timeout - Conversion timeout in milliseconds
+     * @returns {Promise<{blob: Blob, format: string}>}
+     */
+    convert(arrayBuffer, format = 'pdf', timeout = 120000) {
+        return new Promise((resolve, reject) => {
+            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            const timeoutId = setTimeout(() => {
+                this.requestMap.delete(requestId);
+                reject(new Error(`Conversion timeout after ${timeout}ms`));
+            }, timeout);
+
+            this.requestMap.set(requestId, { resolve, reject, timeoutId });
+
+            this.iframe.contentWindow.postMessage({
+                type: 'convert',
+                buffer: arrayBuffer,
+                format: format,
+                requestId: requestId
+            }, '*');
+        });
+    }
+
+    /**
+     * Check if the converter is healthy
+     * @returns {Promise<boolean>}
+     */
+    ping() {
+        return new Promise((resolve) => {
+            const requestId = `ping_${Date.now()}`;
+
+            this.iframe.contentWindow.postMessage({
+                type: 'ping',
+                requestId: requestId
+            }, '*');
+
+            setTimeout(() => resolve(this.isReady), 1000);
+        });
+    }
+}
+
+// Usage example:
+const iframe = document.getElementById('converter');
+const converter = new DocumentConverterClient(iframe);
+
+// Wait for initialization
+await converter.waitForReady();
+
+// Convert a file
+const file = document.querySelector('input[type="file"]').files[0];
+const arrayBuffer = await file.arrayBuffer();
+
+try {
+    const { blob } = await converter.convert(arrayBuffer, 'pdf');
+
+    // Download the result
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'converted.pdf';
+    link.click();
+    URL.revokeObjectURL(url);
+} catch (error) {
+    console.error('Conversion failed:', error);
+}
+```
+
+### Message Protocol Reference
+
+#### Requests
+
+| Type | Properties | Description |
+|------|------------|-------------|
+| `convert` | `buffer`, `format`, `requestId` | Convert document to specified format |
+| `ping` | `requestId` | Check converter health |
+
+#### Responses
+
+| Type | Properties | Description |
+|------|------------|-------------|
+| `ready` | - | Converter has finished initializing |
+| `result` | `blob`, `format`, `requestId` | Successful conversion result |
+| `error` | `error`, `requestId` | Conversion error message |
+| `pong` | `ready`, `requestId` | Health check response |
+
 ## Security Headers
 
 ### Vercel
