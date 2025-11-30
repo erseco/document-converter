@@ -75,16 +75,9 @@ Fullscreen PDF view: <a href="https://erseco.github.io/document-converter/?url=h
 
 #### Convert from Base64 Data
 
-For documents that can't be fetched via URL (due to CORS restrictions), you can pass the file content as Base64:
+For documents that can't be fetched via URL (due to CORS restrictions), you can pass the file content as Base64.
 
-```
-https://erseco.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx
-```
-
-With format and auto-download:
-```
-https://erseco.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx&format=pdf&download=true
-```
+**Example** (text file to PDF): <a href="https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt" target="_blank">https://erseco.github.io/document-converter/?base64=SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IGRvY3VtZW50IGZvciBjb252ZXJzaW9uLg==&name=hello.txt</a>
 
 #### URL Parameters Reference
 
