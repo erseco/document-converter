@@ -71,6 +71,8 @@ With auto-download: <a href="https://erseco.github.io/document-converter/?url=ht
 
 Convert to a different format (ODT to DOCX): <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&format=docx</a>
 
+Fullscreen PDF view: <a href="https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&fullscreen=true" target="_blank">https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/libreoffice/core/master/sw/qa/extras/odfexport/data/fdo38244.odt&fullscreen=true</a>
+
 #### Convert from Base64 Data
 
 For documents that can't be fetched via URL (due to CORS restrictions), you can pass the file content as Base64:
@@ -93,6 +95,7 @@ https://erseco.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document
 | `name` | Filename (required with base64, optional with url) | Conditional | Extracted from URL |
 | `format` | Output format: pdf, docx, xlsx, pptx, odt, ods, odp, html, txt, rtf | No | `pdf` |
 | `download` | If "true", auto-download instead of preview | No | `false` |
+| `fullscreen` | If "true", show PDF in fullscreen (replaces page) | No | `false` |
 
 *Either `url` or `base64` must be provided, but not both.
 

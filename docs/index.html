@@ -254,6 +254,7 @@
             const paramName = urlParams.get('name');
             const paramFormat = urlParams.get('format') || 'pdf';
             const paramDownload = urlParams.get('download') === 'true';
+            const paramFullscreen = urlParams.get('fullscreen') === 'true';
             // New: receive mode - wait for data from opener window via postMessage
             const paramReceive = urlParams.get('receive'); // 'opener' = wait for opener
 
@@ -372,7 +373,7 @@
                 return await resultPromise;
             }
 
-            async function handleConversionResult(result, filename, format, autoDownload) {
+            async function handleConversionResult(result, filename, format, autoDownload, fullscreen = false) {
                 // Support both old format (blob) and new format (data + mimeType)
                 let blob;
                 if (result.blob) {
@@ -393,6 +394,12 @@
 
                 spinner.classList.add('hidden');
 
+                // Fullscreen mode: redirect to the PDF blob URL
+                if (fullscreen && format === 'pdf') {
+                    window.location.href = resultBlobUrl;
+                    return;
+                }
+
                 if (autoDownload) {
                     triggerDownload(resultBlobUrl, outputFilename);
                     showResult('Download started: ' + outputFilename);
@@ -412,7 +419,7 @@
                 }
             }
 
-            async function convertFromUrl(url, format, autoDownload) {
+            async function convertFromUrl(url, format, autoDownload, fullscreen) {
                 const filename = paramName || getFilenameFromUrl(url);
 
                 updateStatus('Fetching document...');
@@ -434,7 +441,7 @@
 
                     await waitForReady(converterModule);
                     const result = await convertArrayBuffer(arrayBuffer, filename, format);
-                    await handleConversionResult(result, filename, format, autoDownload);
+                    await handleConversionResult(result, filename, format, autoDownload, fullscreen);
 
                     autoConvertInfo.classList.add('hidden');
                 } catch (err) {
@@ -448,7 +455,7 @@
                 }
             }
 
-            async function convertFromBase64(base64Data, filename, format, autoDownload) {
+            async function convertFromBase64(base64Data, filename, format, autoDownload, fullscreen) {
                 if (!filename) {
                     showError('Missing "name" parameter. When using base64, you must specify the filename.');
                     return;
@@ -470,7 +477,7 @@
 
                     await waitForReady(converterModule);
                     const result = await convertArrayBuffer(arrayBuffer, filename, format);
-                    await handleConversionResult(result, filename, format, autoDownload);
+                    await handleConversionResult(result, filename, format, autoDownload, fullscreen);
 
                     autoConvertInfo.classList.add('hidden');
                 } catch (err) {
@@ -515,12 +522,13 @@
                         const filename = data.name || paramName || 'document';
                         const format = data.format || paramFormat || 'pdf';
                         const autoDownload = data.download !== undefined ? data.download : paramDownload;
+                        const fullscreen = data.fullscreen !== undefined ? data.fullscreen : paramFullscreen;
 
                         autoConvertInfo.textContent = 'Converting: ' + filename;
 
                         await waitForReady(converterModule);
                         const result = await convertArrayBuffer(arrayBuffer, filename, format);
-                        await handleConversionResult(result, filename, format, autoDownload);
+                        await handleConversionResult(result, filename, format, autoDownload, fullscreen);
 
                         autoConvertInfo.classList.add('hidden');
 
@@ -597,9 +605,9 @@
                             // Opener mode: wait for document via postMessage
                             setupOpenerMode();
                         } else if (paramUrl) {
-                            convertFromUrl(paramUrl, paramFormat, paramDownload);
+                            convertFromUrl(paramUrl, paramFormat, paramDownload, paramFullscreen);
                         } else if (paramBase64) {
-                            convertFromBase64(paramBase64, paramName, paramFormat, paramDownload);
+                            convertFromBase64(paramBase64, paramName, paramFormat, paramDownload, paramFullscreen);
                         }
                     })
                     .catch(function(error) {
