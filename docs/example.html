@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Converter - Example</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafafa;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: #4285f4;
+            background: #e8f0fe;
+        }
+        .drop-zone-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        .drop-zone-text {
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .drop-zone-formats {
+            font-size: 12px;
+            color: #999;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .status-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        .status-icon.loading {
+            border: 3px solid #e0e0e0;
+            border-top-color: #4285f4;
+            animation: spin 1s linear infinite;
+        }
+        .status-icon.ready {
+            background: #34a853;
+            color: white;
+        }
+        .status-icon.error {
+            background: #ea4335;
+            color: white;
+        }
+        .status-icon.converting {
+            border: 3px solid #e0e0e0;
+            border-top-color: #fbbc04;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .status-text {
+            color: #333;
+        }
+        .preview-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: none;
+        }
+        .preview-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .preview-title {
+            font-weight: 600;
+            color: #333;
+        }
+        .preview-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #4285f4;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #3367d6;
+        }
+        .btn-secondary {
+            background: #f1f3f4;
+            color: #333;
+        }
+        .btn-secondary:hover {
+            background: #e8eaed;
+        }
+        .pdf-viewer {
+            width: 100%;
+            height: 70vh;
+            border: none;
+        }
+        .converter-iframe {
+            display: none;
+        }
+        .error-message {
+            background: #fce8e6;
+            color: #c5221f;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+            display: none;
+        }
+        .file-info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            display: none;
+        }
+        .file-info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .file-info-label {
+            color: #666;
+        }
+        .file-info-value {
+            color: #333;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Document Converter</h1>
+        <p class="subtitle">Upload a document to convert it to PDF</p>
+
+        <!-- Status Section -->
+        <div class="status-section">
+            <div class="status">
+                <div class="status-icon loading" id="statusIcon"></div>
+                <span class="status-text" id="statusText">Initializing converter...</span>
+            </div>
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-zone-icon">📄</div>
+                <div class="drop-zone-text">Drop your document here or click to browse</div>
+                <div class="drop-zone-formats">Supported formats: ODT, DOCX, DOC, XLS, XLSX, PPT, PPTX, RTF, TXT</div>
+            </div>
+            <input type="file" id="fileInput" accept=".odt,.docx,.doc,.xls,.xlsx,.ppt,.pptx,.rtf,.txt,.ods,.odp">
+            <div class="file-info" id="fileInfo">
+                <div class="file-info-row">
+                    <span class="file-info-label">File name:</span>
+                    <span class="file-info-value" id="fileName"></span>
+                </div>
+                <div class="file-info-row">
+                    <span class="file-info-label">File size:</span>
+                    <span class="file-info-value" id="fileSize"></span>
+                </div>
+                <div class="file-info-row">
+                    <span class="file-info-label">Status:</span>
+                    <span class="file-info-value" id="conversionStatus">Waiting...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preview Section -->
+        <div class="preview-section" id="previewSection">
+            <div class="preview-header">
+                <span class="preview-title" id="previewTitle">Converted PDF</span>
+                <div class="preview-actions">
+                    <button class="btn btn-secondary" id="convertAnother">Convert Another</button>
+                    <button class="btn btn-primary" id="downloadBtn">Download PDF</button>
+                </div>
+            </div>
+            <iframe class="pdf-viewer" id="pdfViewer"></iframe>
+        </div>
+    </div>
+
+    <!-- Hidden converter iframe -->
+    <iframe class="converter-iframe" id="converter" src="./"></iframe>
+
+    <script>
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusText = document.getElementById('statusText');
+        const errorMessage = document.getElementById('errorMessage');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const conversionStatus = document.getElementById('conversionStatus');
+        const previewSection = document.getElementById('previewSection');
+        const previewTitle = document.getElementById('previewTitle');
+        const pdfViewer = document.getElementById('pdfViewer');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const convertAnother = document.getElementById('convertAnother');
+        const converterIframe = document.getElementById('converter');
+
+        // State
+        let isReady = false;
+        let currentPdfUrl = null;
+        let currentFileName = null;
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Update status
+        function setStatus(type, message) {
+            statusIcon.className = 'status-icon ' + type;
+            statusText.textContent = message;
+
+            if (type === 'ready') {
+                statusIcon.innerHTML = '✓';
+            } else if (type === 'error') {
+                statusIcon.innerHTML = '✕';
+            } else {
+                statusIcon.innerHTML = '';
+            }
+        }
+
+        // Show error
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            setStatus('error', 'Error');
+        }
+
+        // Hide error
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        // Handle message from converter iframe
+        window.addEventListener('message', (event) => {
+            const { type, blob, format, error, requestId } = event.data;
+
+            if (type === 'ready') {
+                isReady = true;
+                setStatus('ready', 'Converter ready - Drop a file to convert');
+            }
+
+            if (type === 'result' && blob) {
+                // Revoke previous URL
+                if (currentPdfUrl) {
+                    URL.revokeObjectURL(currentPdfUrl);
+                }
+
+                // Create URL for the PDF
+                currentPdfUrl = URL.createObjectURL(blob);
+
+                // Show preview
+                pdfViewer.src = currentPdfUrl;
+                previewTitle.textContent = currentFileName.replace(/\.[^.]+$/, '.pdf');
+                previewSection.style.display = 'block';
+
+                // Update status
+                conversionStatus.textContent = 'Completed!';
+                conversionStatus.style.color = '#34a853';
+                setStatus('ready', 'Conversion complete!');
+            }
+
+            if (type === 'error') {
+                showError(error || 'Conversion failed');
+                conversionStatus.textContent = 'Failed';
+                conversionStatus.style.color = '#ea4335';
+            }
+        });
+
+        // Convert file
+        async function convertFile(file) {
+            if (!isReady) {
+                showError('Converter is not ready yet. Please wait...');
+                return;
+            }
+
+            hideError();
+
+            // Update UI
+            currentFileName = file.name;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            conversionStatus.textContent = 'Converting...';
+            conversionStatus.style.color = '#fbbc04';
+            fileInfo.style.display = 'block';
+            previewSection.style.display = 'none';
+
+            setStatus('converting', 'Converting document...');
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+
+                converterIframe.contentWindow.postMessage({
+                    type: 'convert',
+                    buffer: arrayBuffer,
+                    format: 'pdf',
+                    requestId: Date.now().toString()
+                }, '*');
+            } catch (err) {
+                showError('Failed to read file: ' + err.message);
+                conversionStatus.textContent = 'Failed';
+                conversionStatus.style.color = '#ea4335';
+            }
+        }
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                convertFile(file);
+            }
+        });
+
+        // Drop zone click
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                convertFile(file);
+            }
+        });
+
+        // Download button
+        downloadBtn.addEventListener('click', () => {
+            if (currentPdfUrl) {
+                const link = document.createElement('a');
+                link.href = currentPdfUrl;
+                link.download = currentFileName.replace(/\.[^.]+$/, '.pdf');
+                link.click();
+            }
+        });
+
+        // Convert another button
+        convertAnother.addEventListener('click', () => {
+            previewSection.style.display = 'none';
+            fileInfo.style.display = 'none';
+            fileInput.value = '';
+            setStatus('ready', 'Converter ready - Drop a file to convert');
+        });
+
+        // Initialize - wait for converter to be ready
+        setTimeout(() => {
+            if (!isReady) {
+                setStatus('loading', 'Loading LibreOffice WASM (~150MB)... This may take a while.');
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
