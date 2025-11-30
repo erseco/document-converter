@@ -254,8 +254,11 @@
             const paramName = urlParams.get('name');
             const paramFormat = urlParams.get('format') || 'pdf';
             const paramDownload = urlParams.get('download') === 'true';
+            // New: receive mode - wait for data from opener window via postMessage
+            const paramReceive = urlParams.get('receive'); // 'opener' = wait for opener
 
             const hasAutoConvert = paramUrl || paramBase64;
+            const waitForOpener = paramReceive === 'opener';
 
             // Detect if we're in an iframe
             const isIframeMode = window.parent !== window;
@@ -466,6 +469,82 @@
             }
 
             // =================================================================
+            // OPENER MODE: Receive file from window.opener via postMessage
+            // =================================================================
+            // This mode is used when the file is too large for URL parameters.
+            // The opener window sends the file via postMessage after this page loads.
+
+            let openerMessageHandler = null;
+
+            function setupOpenerMode() {
+                if (!window.opener) {
+                    showError('This page was opened in "receive from opener" mode, but no opener window found.');
+                    return;
+                }
+
+                updateStatus('Waiting for document from opener...');
+                autoConvertInfo.textContent = 'Ready to receive document via postMessage';
+                autoConvertInfo.classList.remove('hidden');
+
+                openerMessageHandler = async function(event) {
+                    // Accept messages from any origin since opener could be any domain
+                    const data = event.data;
+
+                    if (!data || data.type !== 'convertDocument') {
+                        return;
+                    }
+
+                    console.log('Received document from opener:', data.name);
+
+                    // Remove the listener after receiving
+                    window.removeEventListener('message', openerMessageHandler);
+
+                    try {
+                        const arrayBuffer = data.buffer;
+                        const filename = data.name || paramName || 'document';
+                        const format = data.format || paramFormat || 'pdf';
+                        const autoDownload = data.download !== undefined ? data.download : paramDownload;
+
+                        autoConvertInfo.textContent = 'Converting: ' + filename;
+
+                        await waitForReady(converterModule);
+                        const result = await convertArrayBuffer(arrayBuffer, filename, format);
+                        await handleConversionResult(result, filename, format, autoDownload);
+
+                        autoConvertInfo.classList.add('hidden');
+
+                        // Notify opener that conversion is complete
+                        if (window.opener) {
+                            window.opener.postMessage({
+                                type: 'conversionComplete',
+                                success: true,
+                                filename: filename
+                            }, '*');
+                        }
+                    } catch (err) {
+                        showError('Failed: ' + err.message);
+                        autoConvertInfo.classList.add('hidden');
+
+                        // Notify opener of error
+                        if (window.opener) {
+                            window.opener.postMessage({
+                                type: 'conversionComplete',
+                                success: false,
+                                error: err.message
+                            }, '*');
+                        }
+                    }
+                };
+
+                window.addEventListener('message', openerMessageHandler);
+
+                // Signal to opener that we're ready to receive
+                if (window.opener) {
+                    window.opener.postMessage({ type: 'converterReady' }, '*');
+                }
+            }
+
+            // =================================================================
             // EVENT HANDLERS
             // =================================================================
 
@@ -503,7 +582,10 @@
                     })
                     .then(function() {
                         // Start auto-conversion if parameters present
-                        if (paramUrl) {
+                        if (waitForOpener) {
+                            // Opener mode: wait for document via postMessage
+                            setupOpenerMode();
+                        } else if (paramUrl) {
                             convertFromUrl(paramUrl, paramFormat, paramDownload);
                         } else if (paramBase64) {
                             convertFromBase64(paramBase64, paramName, paramFormat, paramDownload);
@@ -543,7 +625,7 @@
             }, 100);
 
             // Show auto-convert info if applicable
-            if (hasAutoConvert) {
+            if (hasAutoConvert || waitForOpener) {
                 autoConvertInfo.textContent = 'Waiting for converter to initialize...';
                 autoConvertInfo.classList.remove('hidden');
             }
