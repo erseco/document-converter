@@ -470,21 +470,34 @@ function handleWorkerMessage(e) {
                         // Note: We send the raw data as ArrayBuffer instead of Blob
                         // because Blob transfer via postMessage can be unreliable.
                         // The receiver will reconstruct the Blob.
-                        request.source.postMessage({
+                        const resultData = {
                             type: 'result',
                             data: outputData.buffer,  // ArrayBuffer
                             mimeType: mimeType,
                             format: format,
                             requestId: requestId
-                        }, request.targetOrigin);
+                        };
+
+                        // Use CustomEvent for same-window communication to avoid
+                        // browser extension interference with postMessage
+                        if (request.source === window) {
+                            window.dispatchEvent(new CustomEvent('converter-result', { detail: resultData }));
+                        } else {
+                            request.source.postMessage(resultData, request.targetOrigin);
+                        }
 
                     } catch (err) {
                         // Error reading the output file
-                        request.source.postMessage({
+                        const errorData = {
                             type: 'error',
                             error: err.message,
                             requestId: requestId
-                        }, request.targetOrigin);
+                        };
+                        if (request.source === window) {
+                            window.dispatchEvent(new CustomEvent('converter-result', { detail: errorData }));
+                        } else {
+                            request.source.postMessage(errorData, request.targetOrigin);
+                        }
                     }
 
                     // Remove the completed request from pending
@@ -502,11 +515,16 @@ function handleWorkerMessage(e) {
                     updateStatus(`Conversion error: ${error}`, false);
 
                     // Forward the error to the requesting window
-                    request.source.postMessage({
+                    const errorData = {
                         type: 'error',
                         error: error,
                         requestId: requestId
-                    }, request.targetOrigin);
+                    };
+                    if (request.source === window) {
+                        window.dispatchEvent(new CustomEvent('converter-result', { detail: errorData }));
+                    } else {
+                        request.source.postMessage(errorData, request.targetOrigin);
+                    }
 
                     pendingRequests.delete(requestId);
                 }

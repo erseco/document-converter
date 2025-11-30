@@ -340,22 +340,25 @@
                 // Create promise to wait for result
                 const resultPromise = new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
+                        window.removeEventListener('converter-result', customHandler);
                         reject(new Error('Conversion timeout'));
                     }, 120000);
 
-                    const handler = (event) => {
-                        if (!event.data || event.data.requestId !== requestId) return;
+                    // Use CustomEvent listener to avoid browser extension interference
+                    const customHandler = (event) => {
+                        const data = event.detail;
+                        if (!data || data.requestId !== requestId) return;
 
-                        window.removeEventListener('message', handler);
+                        window.removeEventListener('converter-result', customHandler);
                         clearTimeout(timeout);
 
-                        if (event.data.type === 'result') {
-                            resolve(event.data);
-                        } else if (event.data.type === 'error') {
-                            reject(new Error(event.data.error));
+                        if (data.type === 'result') {
+                            resolve(data);
+                        } else if (data.type === 'error') {
+                            reject(new Error(data.error));
                         }
                     };
-                    window.addEventListener('message', handler);
+                    window.addEventListener('converter-result', customHandler);
                 });
 
                 // Trigger conversion via self-postMessage (uses the converter.js message handler)
