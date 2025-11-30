@@ -20,7 +20,8 @@ const ZETAOFFICE_CDN = 'https://cdn.zetaoffice.net/zetaoffice_latest';
 const WASM_FILES = [
     'soffice.js',
     'soffice.wasm',
-    'soffice.data'
+    'soffice.data',
+    'soffice.data.js.metadata'
 ];
 
 // Target directory for GitHub Pages
