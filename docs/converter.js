@@ -310,12 +310,17 @@ function notifyParent(message, targetOrigin = '*') {
 function createOfficeThreadBlob() {
     // Get absolute URL for the zetaHelper module (required for ES module import)
     const zetajsUrl = new URL(`${ZETAJS_BASE_URL}/zetaHelper.js`, window.location.href).href;
+    console.log('converter.js: Creating thread script with zetaHelper URL:', zetajsUrl);
 
     // The worker thread script as a string
     // This will be executed in a separate thread by ZetaJS
     const code = `
+        console.log('Worker thread: Script starting...');
+
         // Import ZetaHelperThread - this provides access to LibreOffice's UNO API
         import { ZetaHelperThread } from '${zetajsUrl}';
+
+        console.log('Worker thread: ZetaHelperThread imported, initializing...');
 
         // Initialize the helper thread
         // This gives us access to:
@@ -326,6 +331,8 @@ function createOfficeThreadBlob() {
         const zHT = new ZetaHelperThread();
         const zetajs = zHT.zetajs;
         const css = zHT.css;
+
+        console.log('Worker thread: ZetaHelperThread initialized');
 
         // LibreOffice export filter names (duplicated here as this runs in a separate context)
         const filterMap = {
@@ -351,10 +358,12 @@ function createOfficeThreadBlob() {
 
         // Handle messages from the main thread
         zHT.thrPort.onmessage = (e) => {
+            console.log('Worker thread: Received message:', e.data.cmd);
             switch (e.data.cmd) {
                 case 'convert':
                     try {
                         const { from, to, format, requestId } = e.data;
+                        console.log('Worker thread: Converting', from, 'to', format);
 
                         // Get the appropriate filter for the output format
                         const filterName = filterMap[format.toLowerCase()] || 'writer_pdf_Export';
@@ -378,6 +387,7 @@ function createOfficeThreadBlob() {
                         // Close the document to free resources
                         xModel.close(true);
 
+                        console.log('Worker thread: Conversion complete');
                         // Notify main thread of success
                         zHT.thrPort.postMessage({cmd: 'converted', from, to, format, requestId});
 
@@ -385,22 +395,26 @@ function createOfficeThreadBlob() {
                         // Handle both UNO exceptions and regular JavaScript errors
                         const exc = zetajs.catchUnoException(err);
                         const errMsg = exc ? exc.Message : (err.message || String(err));
+                        console.error('Worker thread: Conversion error:', errMsg);
                         zHT.thrPort.postMessage({cmd: 'error', error: errMsg, requestId: e.data.requestId});
                     }
                     break;
 
                 default:
-                    console.warn('Unknown command in office thread:', e.data.cmd);
+                    console.warn('Worker thread: Unknown command:', e.data.cmd);
             }
         };
 
         // Signal to main thread that we're ready to accept conversion requests
+        console.log('Worker thread: Sending ready message');
         zHT.thrPort.postMessage({cmd: 'ready'});
     `;
 
     // Create a Blob from the script code and return its URL
     const blob = new Blob([code], { type: 'text/javascript' });
-    return URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
+    console.log('converter.js: Created thread script blob URL:', blobUrl);
+    return blobUrl;
 }
 
 // =============================================================================
@@ -528,16 +542,19 @@ function handleWorkerMessage(e) {
 export async function initZetaJS() {
     try {
         updateStatus('Loading ZetaJS module...');
+        console.log('converter.js: Loading ZetaJS module from', `${ZETAJS_BASE_URL}/zetaHelper.js`);
 
         // Dynamically import ZetaHelperMain from local vendor folder
         // Using dynamic import() because this is an ES module
         const { ZetaHelperMain } = await import(`${ZETAJS_BASE_URL}/zetaHelper.js`);
+        console.log('converter.js: ZetaHelperMain imported successfully');
 
         updateStatus('Initializing LibreOffice WASM...');
 
         // Convert relative WASM path to absolute URL
         // ZetaJS needs absolute URLs to properly fetch the WASM files
         const wasmUrl = new URL(WASM_BASE_URL + '/', window.location.href).href;
+        console.log('converter.js: WASM URL:', wasmUrl);
 
         // Create the worker thread script BEFORE initializing ZetaHelperMain
         // This is critical - the script must exist when ZetaHelperMain starts
@@ -551,11 +568,13 @@ export async function initZetaJS() {
         //   - wasmPkg: Location of WASM files ('url:' prefix indicates a URL)
         //   - blockPageScroll: Don't interfere with page scrolling
         //   - threadJsType: 'module' for ES module syntax in worker script
+        console.log('converter.js: Creating ZetaHelperMain with threadJs:', threadJsUrl);
         zHM = new ZetaHelperMain(threadJsUrl, {
             wasmPkg: 'url:' + wasmUrl,
             blockPageScroll: false,
             threadJsType: 'module'
         });
+        console.log('converter.js: ZetaHelperMain created');
 
         /**
          * Sets up the message handler for worker thread communication.
@@ -567,20 +586,24 @@ export async function initZetaJS() {
         const setupMessageHandler = () => {
             if (!zHM.thrPort) {
                 // thrPort not ready yet, poll again in 100ms
+                console.log('converter.js: thrPort not ready yet, polling...');
                 setTimeout(setupMessageHandler, 100);
                 return;
             }
 
+            console.log('converter.js: thrPort is ready, attaching message handler');
             // Attach our message handler to receive worker responses
             zHM.thrPort.onmessage = (e) => {
+                console.log('converter.js: Received message from worker:', e.data);
                 handleWorkerMessage(e);
             };
         };
 
         // Start LibreOffice WASM loading
         // This triggers the download and initialization of ~150MB of WASM files
+        console.log('converter.js: Starting ZetaOffice...');
         zHM.start(() => {
-            console.log('converter.js: ZetaOffice started');
+            console.log('converter.js: ZetaOffice start() callback fired');
             setupMessageHandler();
         });
 
