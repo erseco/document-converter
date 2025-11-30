@@ -36,7 +36,7 @@ GitHub Pages deployment uses a GitHub Actions workflow to:
 **Setup:**
 1. Enable GitHub Pages in your repository settings, using "GitHub Actions" as the source
 2. The workflow will automatically run on push to `main` branch
-3. Your converter will be available at `https://yourusername.github.io/document-converter/`
+3. Your converter will be available at `https://erseco.github.io/document-converter/`
 
 **Files in the `docs/` folder:**
 - `coi-serviceworker.js` - Service Worker that adds COOP/COEP headers
@@ -56,17 +56,34 @@ You can convert documents directly via URL parameters without writing any code. 
 #### Convert from a Remote URL
 
 ```
-https://yourusername.github.io/document-converter/?url=https://example.com/document.docx
+https://erseco.github.io/document-converter/?url=https://example.com/document.docx
 ```
+
+**Working examples** (using GitHub raw files which allow CORS):
+
+- DOCX to PDF:
+  ```
+  https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/AASJournals/aastex62-workshop/master/aastex-webinar.docx
+  ```
+
+- ODT to PDF:
+  ```
+  https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/jgm/pandoc/main/test/odt/native/image.odt
+  ```
+
+- PPTX to PDF:
+  ```
+  https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/jgm/pandoc/main/test/pptx/document-properties/document-properties.pptx
+  ```
 
 With auto-download:
 ```
-https://yourusername.github.io/document-converter/?url=https://example.com/document.docx&download=true
+https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/AASJournals/aastex62-workshop/master/aastex-webinar.docx&download=true
 ```
 
 Convert to a different format:
 ```
-https://yourusername.github.io/document-converter/?url=https://example.com/document.odt&format=docx
+https://erseco.github.io/document-converter/?url=https://raw.githubusercontent.com/jgm/pandoc/main/test/odt/native/image.odt&format=docx
 ```
 
 #### Convert from Base64 Data
@@ -74,12 +91,12 @@ https://yourusername.github.io/document-converter/?url=https://example.com/docum
 For documents that can't be fetched via URL (due to CORS restrictions), you can pass the file content as Base64:
 
 ```
-https://yourusername.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx
+https://erseco.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx
 ```
 
 With format and auto-download:
 ```
-https://yourusername.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx&format=pdf&download=true
+https://erseco.github.io/document-converter/?base64=UEsDBBQAAAA...&name=document.docx&format=pdf&download=true
 ```
 
 #### URL Parameters Reference
@@ -120,7 +137,7 @@ async function getConversionUrl(file, format = 'pdf', autoDownload = false) {
         params.set('download', 'true');
     }
 
-    return `https://yourusername.github.io/document-converter/?${params.toString()}`;
+    return `https://erseco.github.io/document-converter/?${params.toString()}`;
 }
 
 // Usage
@@ -140,7 +157,7 @@ The `example.html` page provides a full-featured interface with:
 
 Access it at:
 ```
-https://yourusername.github.io/document-converter/example.html
+https://erseco.github.io/document-converter/example.html
 ```
 
 ### Embedding in an iframe
@@ -152,7 +169,7 @@ https://yourusername.github.io/document-converter/example.html
 
 **GitHub Pages deployment:**
 ```html
-<iframe id="converter" src="https://yourusername.github.io/document-converter/"></iframe>
+<iframe id="converter" src="https://erseco.github.io/document-converter/"></iframe>
 ```
 
 ### With origin whitelist (optional security)
@@ -206,7 +223,7 @@ The GitHub Pages version is specifically designed to work as an isolated iframe 
 ```javascript
 // In WordPress
 const converterIframe = document.createElement('iframe');
-converterIframe.src = 'https://yourusername.github.io/document-converter/';
+converterIframe.src = 'https://erseco.github.io/document-converter/';
 document.body.appendChild(converterIframe);
 
 // Send file for conversion (supports both 'buffer' and 'file' property names)
