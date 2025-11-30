@@ -189,12 +189,26 @@
             color: #333;
             font-weight: 500;
         }
+        .auto-convert-notice {
+            background: #e8f0fe;
+            border: 1px solid #4285f4;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #1a73e8;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Document Converter</h1>
         <p class="subtitle">Upload a document to convert it to PDF</p>
+
+        <!-- Auto-convert notice (shown when URL params are used) -->
+        <div class="auto-convert-notice" id="autoConvertNotice">
+            <strong>Auto-conversion:</strong> <span id="autoConvertMessage"></span>
+        </div>
 
         <!-- Status Section -->
         <div class="status-section">
@@ -206,7 +220,7 @@
         </div>
 
         <!-- Upload Section -->
-        <div class="upload-section">
+        <div class="upload-section" id="uploadSection">
             <div class="drop-zone" id="dropZone">
                 <div class="drop-zone-icon">📄</div>
                 <div class="drop-zone-text">Drop your document here or click to browse</div>
@@ -246,7 +260,62 @@
     <iframe class="converter-iframe" id="converter" src="./"></iframe>
 
     <script>
-        // DOM Elements
+        /**
+         * =============================================================================
+         * URL PARAMETERS FOR AUTOMATIC CONVERSION
+         * =============================================================================
+         *
+         * This page supports automatic document conversion via URL parameters.
+         * This is useful for integrating with other applications or creating
+         * direct conversion links.
+         *
+         * SUPPORTED PARAMETERS:
+         * ---------------------
+         *
+         * 1. Convert from URL (fetch a remote document):
+         *    ?url=https://example.com/document.docx
+         *    ?url=https://example.com/document.docx&format=pdf&download=true
+         *
+         * 2. Convert from Base64 (inline document data):
+         *    ?base64=<base64-encoded-data>&name=document.docx
+         *    ?base64=<base64-encoded-data>&name=document.docx&format=pdf
+         *
+         * PARAMETERS:
+         * -----------
+         * - url:      URL of the document to fetch and convert (must support CORS)
+         * - base64:   Base64-encoded document content
+         * - name:     Filename (required with base64, optional with url)
+         * - format:   Output format: pdf, docx, xlsx, pptx, odt, ods, odp, html, txt, rtf
+         *             Default: pdf
+         * - download: If "true", auto-download the result instead of preview
+         *
+         * EXAMPLES:
+         * ---------
+         * Convert a remote DOCX to PDF and preview:
+         *   example.html?url=https://example.com/report.docx
+         *
+         * Convert a remote file and auto-download:
+         *   example.html?url=https://example.com/report.docx&download=true
+         *
+         * Convert base64 data to PDF:
+         *   example.html?base64=UEsDBBQAAAA...&name=document.docx
+         *
+         * Convert to a different format:
+         *   example.html?url=https://example.com/doc.odt&format=docx
+         *
+         * CORS LIMITATIONS:
+         * -----------------
+         * When using the 'url' parameter, the remote server must allow CORS requests.
+         * If you get CORS errors, use the 'base64' method instead, or set up a
+         * CORS proxy server.
+         *
+         * For testing, you can use files from servers that allow CORS, or host
+         * your files on the same domain as this converter.
+         */
+
+        // =============================================================================
+        // DOM ELEMENTS
+        // =============================================================================
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const statusIcon = document.getElementById('statusIcon');
@@ -262,20 +331,47 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const convertAnother = document.getElementById('convertAnother');
         const converterIframe = document.getElementById('converter');
+        const uploadSection = document.getElementById('uploadSection');
+        const autoConvertNotice = document.getElementById('autoConvertNotice');
+        const autoConvertMessage = document.getElementById('autoConvertMessage');
 
-        // State
+        // =============================================================================
+        // STATE
+        // =============================================================================
         let isReady = false;
         let currentPdfUrl = null;
         let currentFileName = null;
+        let pendingAutoConvert = null; // Stores auto-convert params until converter is ready
 
-        // Format file size
+        // =============================================================================
+        // URL PARAMETER PARSING
+        // =============================================================================
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramUrl = urlParams.get('url');
+        const paramBase64 = urlParams.get('base64');
+        const paramName = urlParams.get('name');
+        const paramFormat = urlParams.get('format') || 'pdf';
+        const paramDownload = urlParams.get('download') === 'true';
+
+        // Check if we have auto-convert parameters
+        const hasAutoConvert = paramUrl || paramBase64;
+
+        // =============================================================================
+        // UTILITY FUNCTIONS
+        // =============================================================================
+
+        /**
+         * Format file size for display
+         */
         function formatFileSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
-        // Update status
+        /**
+         * Update status display
+         */
         function setStatus(type, message) {
             statusIcon.className = 'status-icon ' + type;
             statusText.textContent = message;
@@ -289,64 +385,283 @@
             }
         }
 
-        // Show error
+        /**
+         * Show error message
+         */
         function showError(message) {
             errorMessage.textContent = message;
             errorMessage.style.display = 'block';
             setStatus('error', 'Error');
         }
 
-        // Hide error
+        /**
+         * Hide error message
+         */
         function hideError() {
             errorMessage.style.display = 'none';
         }
 
-        // Handle message from converter iframe
+        /**
+         * Extract filename from URL
+         */
+        function getFilenameFromUrl(url) {
+            try {
+                const urlObj = new URL(url);
+                const pathname = urlObj.pathname;
+                const filename = pathname.split('/').pop();
+                return filename || 'document';
+            } catch (e) {
+                return 'document';
+            }
+        }
+
+        /**
+         * Get output extension for format
+         */
+        function getOutputExtension(format) {
+            const extensions = {
+                'pdf': 'pdf',
+                'docx': 'docx',
+                'xlsx': 'xlsx',
+                'pptx': 'pptx',
+                'odt': 'odt',
+                'ods': 'ods',
+                'odp': 'odp',
+                'html': 'html',
+                'txt': 'txt',
+                'rtf': 'rtf',
+                'png': 'png',
+                'jpg': 'jpg'
+            };
+            return extensions[format.toLowerCase()] || 'pdf';
+        }
+
+        /**
+         * Trigger file download
+         */
+        function triggerDownload(url, filename) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // =============================================================================
+        // CONVERSION FUNCTIONS
+        // =============================================================================
+
+        /**
+         * Convert an ArrayBuffer to the specified format
+         */
+        async function convertArrayBuffer(arrayBuffer, filename, format = 'pdf', autoDownload = false) {
+            if (!isReady) {
+                // Store for later when converter is ready
+                pendingAutoConvert = { arrayBuffer, filename, format, autoDownload };
+                return;
+            }
+
+            hideError();
+
+            // Update UI
+            currentFileName = filename;
+            fileName.textContent = filename;
+            fileSize.textContent = formatFileSize(arrayBuffer.byteLength);
+            conversionStatus.textContent = 'Converting...';
+            conversionStatus.style.color = '#fbbc04';
+            fileInfo.style.display = 'block';
+            previewSection.style.display = 'none';
+
+            setStatus('converting', 'Converting document...');
+
+            // Store auto-download preference for result handler
+            window._autoDownload = autoDownload;
+            window._outputFormat = format;
+
+            try {
+                converterIframe.contentWindow.postMessage({
+                    type: 'convert',
+                    buffer: arrayBuffer,
+                    format: format,
+                    requestId: Date.now().toString()
+                }, '*');
+            } catch (err) {
+                showError('Failed to send conversion request: ' + err.message);
+                conversionStatus.textContent = 'Failed';
+                conversionStatus.style.color = '#ea4335';
+            }
+        }
+
+        /**
+         * Convert a File object
+         */
+        async function convertFile(file, format = 'pdf', autoDownload = false) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                await convertArrayBuffer(arrayBuffer, file.name, format, autoDownload);
+            } catch (err) {
+                showError('Failed to read file: ' + err.message);
+            }
+        }
+
+        /**
+         * Fetch and convert a document from URL
+         */
+        async function convertFromUrl(url, format = 'pdf', autoDownload = false) {
+            const filename = paramName || getFilenameFromUrl(url);
+
+            setStatus('loading', 'Fetching document from URL...');
+            autoConvertNotice.style.display = 'block';
+            autoConvertMessage.textContent = `Fetching: ${url}`;
+
+            try {
+                const response = await fetch(url, {
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                autoConvertMessage.textContent = `Converting: ${filename}`;
+
+                await convertArrayBuffer(arrayBuffer, filename, format, autoDownload);
+            } catch (err) {
+                let errorMsg = err.message;
+                if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
+                    errorMsg = 'CORS error: The remote server does not allow cross-origin requests. ' +
+                               'Try using the base64 parameter instead, or host the file on a CORS-enabled server.';
+                }
+                showError('Failed to fetch document: ' + errorMsg);
+                autoConvertNotice.style.display = 'none';
+            }
+        }
+
+        /**
+         * Convert a document from Base64 data
+         */
+        async function convertFromBase64(base64Data, filename, format = 'pdf', autoDownload = false) {
+            if (!filename) {
+                showError('Missing "name" parameter. When using base64, you must specify the filename.');
+                return;
+            }
+
+            setStatus('loading', 'Decoding document...');
+            autoConvertNotice.style.display = 'block';
+            autoConvertMessage.textContent = `Decoding: ${filename}`;
+
+            try {
+                // Decode base64 to ArrayBuffer
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                const arrayBuffer = bytes.buffer;
+
+                autoConvertMessage.textContent = `Converting: ${filename}`;
+                await convertArrayBuffer(arrayBuffer, filename, format, autoDownload);
+            } catch (err) {
+                showError('Failed to decode base64 data: ' + err.message);
+                autoConvertNotice.style.display = 'none';
+            }
+        }
+
+        // =============================================================================
+        // MESSAGE HANDLING
+        // =============================================================================
+
+        /**
+         * Handle messages from converter iframe
+         */
         window.addEventListener('message', (event) => {
             // Ignore non-object messages
             if (!event.data || typeof event.data !== 'object') return;
 
             const { type, blob, format, error, requestId, ready } = event.data;
 
+            // Converter is ready
             if (type === 'ready') {
                 isReady = true;
-                setStatus('ready', 'Converter ready - Drop a file to convert');
+
+                // If we have pending auto-convert, do it now
+                if (pendingAutoConvert) {
+                    const { arrayBuffer, filename, format, autoDownload } = pendingAutoConvert;
+                    pendingAutoConvert = null;
+                    convertArrayBuffer(arrayBuffer, filename, format, autoDownload);
+                } else if (!hasAutoConvert) {
+                    setStatus('ready', 'Converter ready - Drop a file to convert');
+                }
             }
 
             // Handle pong response from polling
             if (type === 'pong' && ready && !isReady) {
                 isReady = true;
-                setStatus('ready', 'Converter ready - Drop a file to convert');
+
+                if (pendingAutoConvert) {
+                    const { arrayBuffer, filename, format, autoDownload } = pendingAutoConvert;
+                    pendingAutoConvert = null;
+                    convertArrayBuffer(arrayBuffer, filename, format, autoDownload);
+                } else if (!hasAutoConvert) {
+                    setStatus('ready', 'Converter ready - Drop a file to convert');
+                }
             }
 
+            // Conversion result
             if (type === 'result' && blob) {
                 // Revoke previous URL
                 if (currentPdfUrl) {
                     URL.revokeObjectURL(currentPdfUrl);
                 }
 
-                // Create URL for the PDF
+                // Create URL for the result
                 currentPdfUrl = URL.createObjectURL(blob);
 
-                // Show preview
-                pdfViewer.src = currentPdfUrl;
-                previewTitle.textContent = currentFileName.replace(/\.[^.]+$/, '.pdf');
-                previewSection.style.display = 'block';
+                // Get output filename
+                const outputFormat = window._outputFormat || 'pdf';
+                const outputExt = getOutputExtension(outputFormat);
+                const outputFilename = currentFileName.replace(/\.[^.]+$/, '.' + outputExt);
 
-                // Update status
-                conversionStatus.textContent = 'Completed!';
-                conversionStatus.style.color = '#34a853';
-                setStatus('ready', 'Conversion complete!');
+                // Auto-download or preview
+                if (window._autoDownload) {
+                    triggerDownload(currentPdfUrl, outputFilename);
+                    setStatus('ready', 'Download started!');
+                    conversionStatus.textContent = 'Downloaded!';
+                    conversionStatus.style.color = '#34a853';
+                    autoConvertNotice.style.display = 'none';
+                } else {
+                    // Show preview
+                    pdfViewer.src = currentPdfUrl;
+                    previewTitle.textContent = outputFilename;
+                    previewSection.style.display = 'block';
+                    autoConvertNotice.style.display = 'none';
+
+                    // Update status
+                    conversionStatus.textContent = 'Completed!';
+                    conversionStatus.style.color = '#34a853';
+                    setStatus('ready', 'Conversion complete!');
+                }
+
+                // Update download button
+                downloadBtn.textContent = 'Download ' + outputExt.toUpperCase();
             }
 
+            // Conversion error
             if (type === 'error') {
                 showError(error || 'Conversion failed');
                 conversionStatus.textContent = 'Failed';
                 conversionStatus.style.color = '#ea4335';
+                autoConvertNotice.style.display = 'none';
             }
         });
 
-        // Poll for ready status in case 'ready' message is missed
+        // =============================================================================
+        // POLLING FOR READY STATUS
+        // =============================================================================
+
         function pollReadyStatus() {
             if (isReady) return;
 
@@ -366,47 +681,15 @@
         // Start polling after a delay
         setTimeout(pollReadyStatus, 5000);
 
-        // Convert file
-        async function convertFile(file) {
-            if (!isReady) {
-                showError('Converter is not ready yet. Please wait...');
-                return;
-            }
-
-            hideError();
-
-            // Update UI
-            currentFileName = file.name;
-            fileName.textContent = file.name;
-            fileSize.textContent = formatFileSize(file.size);
-            conversionStatus.textContent = 'Converting...';
-            conversionStatus.style.color = '#fbbc04';
-            fileInfo.style.display = 'block';
-            previewSection.style.display = 'none';
-
-            setStatus('converting', 'Converting document...');
-
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-
-                converterIframe.contentWindow.postMessage({
-                    type: 'convert',
-                    buffer: arrayBuffer,
-                    format: 'pdf',
-                    requestId: Date.now().toString()
-                }, '*');
-            } catch (err) {
-                showError('Failed to read file: ' + err.message);
-                conversionStatus.textContent = 'Failed';
-                conversionStatus.style.color = '#ea4335';
-            }
-        }
+        // =============================================================================
+        // FILE INPUT HANDLERS
+        // =============================================================================
 
         // File input change
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
-                convertFile(file);
+                convertFile(file, paramFormat, false);
             }
         });
 
@@ -431,17 +714,17 @@
 
             const file = e.dataTransfer.files[0];
             if (file) {
-                convertFile(file);
+                convertFile(file, paramFormat, false);
             }
         });
 
         // Download button
         downloadBtn.addEventListener('click', () => {
             if (currentPdfUrl) {
-                const link = document.createElement('a');
-                link.href = currentPdfUrl;
-                link.download = currentFileName.replace(/\.[^.]+$/, '.pdf');
-                link.click();
+                const outputFormat = window._outputFormat || 'pdf';
+                const outputExt = getOutputExtension(outputFormat);
+                const outputFilename = currentFileName.replace(/\.[^.]+$/, '.' + outputExt);
+                triggerDownload(currentPdfUrl, outputFilename);
             }
         });
 
@@ -450,15 +733,27 @@
             previewSection.style.display = 'none';
             fileInfo.style.display = 'none';
             fileInput.value = '';
+            autoConvertNotice.style.display = 'none';
+
+            // Clear URL params from address bar without reload
+            if (hasAutoConvert) {
+                const cleanUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
+
             setStatus('ready', 'Converter ready - Drop a file to convert');
         });
 
-        // Check for Cross-Origin Isolation
+        // =============================================================================
+        // INITIALIZATION
+        // =============================================================================
+
+        /**
+         * Check for Cross-Origin Isolation
+         */
         function checkCOI() {
             if (!window.crossOriginIsolated) {
                 setStatus('loading', 'Enabling Cross-Origin Isolation...');
-                // The service worker should reload the page automatically
-                // If not, show a message after 5 seconds
                 setTimeout(() => {
                     if (!window.crossOriginIsolated) {
                         setStatus('error', 'Cross-Origin Isolation failed. Try refreshing the page.');
@@ -470,13 +765,35 @@
             return true;
         }
 
-        // Initialize - check COI and wait for converter to be ready
+        /**
+         * Start auto-conversion if URL parameters are present
+         */
+        function startAutoConvert() {
+            if (paramUrl) {
+                convertFromUrl(paramUrl, paramFormat, paramDownload);
+            } else if (paramBase64) {
+                convertFromBase64(paramBase64, paramName, paramFormat, paramDownload);
+            }
+        }
+
+        // Initialize
         if (checkCOI()) {
+            // If we have auto-convert params, show notice
+            if (hasAutoConvert) {
+                autoConvertNotice.style.display = 'block';
+                autoConvertMessage.textContent = 'Waiting for converter to initialize...';
+            }
+
             setTimeout(() => {
                 if (!isReady) {
                     setStatus('loading', 'Loading LibreOffice WASM (~150MB)... This may take a while.');
                 }
             }, 2000);
+
+            // Start auto-conversion (will wait for converter to be ready)
+            if (hasAutoConvert) {
+                startAutoConvert();
+            }
         }
     </script>
 </body>
