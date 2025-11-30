@@ -522,17 +522,25 @@ function handleWorkerMessage(e) {
  * INITIALIZATION SEQUENCE:
  * ------------------------
  * 1. Import ZetaHelperMain from the local zetajs vendor folder
- * 2. Create the worker thread script as a Blob URL
- * 3. Create ZetaHelperMain with the thread script and WASM configuration
- * 4. Call start() to begin loading LibreOffice WASM (~150MB)
- * 5. Set up message handler to receive 'ready' signal from worker
+ * 2. Create ZetaHelperMain WITHOUT a thread script (pass null)
+ * 3. Call start() to begin loading LibreOffice WASM (~150MB)
+ * 4. Set up message handler and wait for 'ZetaHelper::thr_started'
+ * 5. When thr_started is received, inject our thread script via message
+ * 6. Our script runs and sends 'ready' message when initialized
  *
- * WHY THREAD SCRIPT IS PASSED TO CONSTRUCTOR:
- * -------------------------------------------
- * ZetaHelperMain needs to know about the worker script at construction time
- * so it can properly initialize the worker thread during start(). If we tried
- * to inject the script later (via message), we would miss the initialization
- * window and get "No threadJs given" errors.
+ * WHY THREAD SCRIPT IS INJECTED AFTER thr_started:
+ * -------------------------------------------------
+ * ZetaHelper's architecture requires a specific initialization sequence:
+ *
+ * 1. Create ZetaHelperMain WITHOUT a thread script (pass null)
+ * 2. Call start() to begin loading LibreOffice WASM
+ * 3. Wait for the 'ZetaHelper::thr_started' message from the worker
+ * 4. THEN inject our custom script via 'ZetaHelper::run_thr_script' message
+ *
+ * This is because the worker thread needs to be fully initialized before
+ * it can accept and execute custom scripts. Attempting to pass the script
+ * in the constructor results in "No threadJs given" errors because the
+ * worker isn't ready to receive it yet.
  *
  * The threadJsType: 'module' option tells ZetaJS that our worker script uses
  * ES module syntax (import/export) rather than classic script syntax.
@@ -556,25 +564,47 @@ export async function initZetaJS() {
         const wasmUrl = new URL(WASM_BASE_URL + '/', window.location.href).href;
         console.log('converter.js: WASM URL:', wasmUrl);
 
-        // Create the worker thread script BEFORE initializing ZetaHelperMain
-        // This is critical - the script must exist when ZetaHelperMain starts
-        const threadJsUrl = createOfficeThreadBlob();
-
-        // Create ZetaHelperMain with all required configuration
+        // Create ZetaHelperMain WITHOUT threadJs - we'll inject it after thr_started
         //
-        // Parameters:
-        // - threadJsUrl: URL to the worker script (created above as Blob URL)
-        // - options object:
-        //   - wasmPkg: Location of WASM files ('url:' prefix indicates a URL)
-        //   - blockPageScroll: Don't interfere with page scrolling
-        //   - threadJsType: 'module' for ES module syntax in worker script
-        console.log('converter.js: Creating ZetaHelperMain with threadJs:', threadJsUrl);
-        zHM = new ZetaHelperMain(threadJsUrl, {
+        // IMPORTANT: ZetaHelper's architecture requires us to:
+        // 1. Create ZetaHelperMain without a thread script
+        // 2. Wait for the 'ZetaHelper::thr_started' message
+        // 3. Then inject our thread script via 'ZetaHelper::run_thr_script'
+        //
+        // This is because the worker thread needs to be fully initialized
+        // before it can accept and execute our custom script.
+        console.log('converter.js: Creating ZetaHelperMain (without threadJs, will inject later)');
+        zHM = new ZetaHelperMain(null, {
             wasmPkg: 'url:' + wasmUrl,
-            blockPageScroll: false,
-            threadJsType: 'module'
+            blockPageScroll: false
         });
         console.log('converter.js: ZetaHelperMain created');
+
+        // Track whether we've already injected the thread script
+        let threadScriptInjected = false;
+
+        /**
+         * Injects our custom thread script into the worker.
+         * Called when we receive 'ZetaHelper::thr_started' message.
+         */
+        const injectThreadScript = () => {
+            if (threadScriptInjected) {
+                console.log('converter.js: Thread script already injected, skipping');
+                return;
+            }
+            threadScriptInjected = true;
+
+            const threadJsUrl = createOfficeThreadBlob();
+            console.log('converter.js: Injecting thread script:', threadJsUrl);
+
+            // Send the script to the worker thread for execution
+            // The worker will load this as an ES module and run it
+            zHM.thrPort.postMessage({
+                cmd: 'ZetaHelper::run_thr_script',
+                threadJs: threadJsUrl,
+                threadJsType: 'module'
+            });
+        };
 
         /**
          * Sets up the message handler for worker thread communication.
@@ -592,9 +622,20 @@ export async function initZetaJS() {
             }
 
             console.log('converter.js: thrPort is ready, attaching message handler');
+
             // Attach our message handler to receive worker responses
             zHM.thrPort.onmessage = (e) => {
                 console.log('converter.js: Received message from worker:', e.data);
+
+                // Handle ZetaHelper internal messages
+                if (e.data.cmd === 'ZetaHelper::thr_started') {
+                    // The worker thread is ready - now we can inject our script
+                    console.log('converter.js: Worker thread started, injecting our script...');
+                    injectThreadScript();
+                    return;
+                }
+
+                // Handle our custom messages (ready, converted, error)
                 handleWorkerMessage(e);
             };
         };
