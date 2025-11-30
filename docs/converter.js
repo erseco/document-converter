@@ -269,9 +269,15 @@ export async function initZetaJS() {
             wasmPkg: 'url:' + wasmUrl,
             blockPageScroll: false
         });
-        
-        // Start ZetaOffice
-        zHM.start(() => {
+
+        // Set up message handler BEFORE starting
+        const setupMessageHandler = () => {
+            if (!zHM.thrPort) {
+                // thrPort not ready yet, try again
+                setTimeout(setupMessageHandler, 100);
+                return;
+            }
+
             zHM.thrPort.onmessage = (e) => {
                 switch (e.data.cmd) {
                     case 'ZetaHelper::thr_started':
@@ -286,8 +292,13 @@ export async function initZetaJS() {
                         handleWorkerMessage(e);
                 }
             };
+        };
+
+        // Start ZetaOffice and setup handler
+        zHM.start(() => {
+            setupMessageHandler();
         });
-        
+
         return true;
     } catch (error) {
         updateStatus(`Error initializing: ${error.message}`, false);

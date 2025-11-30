@@ -300,9 +300,18 @@
 
         // Handle message from converter iframe
         window.addEventListener('message', (event) => {
-            const { type, blob, format, error, requestId } = event.data;
+            // Ignore non-object messages
+            if (!event.data || typeof event.data !== 'object') return;
+
+            const { type, blob, format, error, requestId, ready } = event.data;
 
             if (type === 'ready') {
+                isReady = true;
+                setStatus('ready', 'Converter ready - Drop a file to convert');
+            }
+
+            // Handle pong response from polling
+            if (type === 'pong' && ready && !isReady) {
                 isReady = true;
                 setStatus('ready', 'Converter ready - Drop a file to convert');
             }
@@ -333,6 +342,26 @@
                 conversionStatus.style.color = '#ea4335';
             }
         });
+
+        // Poll for ready status in case 'ready' message is missed
+        function pollReadyStatus() {
+            if (isReady) return;
+
+            try {
+                converterIframe.contentWindow.postMessage({
+                    type: 'ping',
+                    requestId: 'poll_' + Date.now()
+                }, '*');
+            } catch (e) {
+                // Iframe not ready yet
+            }
+
+            // Keep polling until ready
+            setTimeout(pollReadyStatus, 2000);
+        }
+
+        // Start polling after a delay
+        setTimeout(pollReadyStatus, 5000);
 
         // Convert file
         async function convertFile(file) {
