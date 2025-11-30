@@ -7,6 +7,7 @@
 import https from 'https';
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,10 +32,16 @@ const TARGET_DIR = path.join(__dirname, '..', 'docs', 'wasm');
 function downloadFile(url, destPath) {
     return new Promise((resolve, reject) => {
         console.log(`Downloading: ${url}`);
-        
+
         const file = fs.createWriteStream(destPath);
-        
-        https.get(url, (response) => {
+
+        const options = {
+            headers: {
+                'Accept-Encoding': 'br, gzip, deflate'
+            }
+        };
+
+        https.get(url, options, (response) => {
             // Handle redirects
             if (response.statusCode === 301 || response.statusCode === 302) {
                 file.close();
@@ -45,17 +52,32 @@ function downloadFile(url, destPath) {
                     .catch(reject);
                 return;
             }
-            
+
             if (response.statusCode !== 200) {
                 file.close();
                 fs.unlinkSync(destPath);
                 reject(new Error(`Failed to download ${url}: HTTP ${response.statusCode}`));
                 return;
             }
-            
+
+            // Handle content encoding (decompress if needed)
+            const contentEncoding = response.headers['content-encoding'];
+            let stream = response;
+
+            if (contentEncoding === 'br') {
+                console.log(`  Content-Encoding: brotli (decompressing)`);
+                stream = response.pipe(zlib.createBrotliDecompress());
+            } else if (contentEncoding === 'gzip') {
+                console.log(`  Content-Encoding: gzip (decompressing)`);
+                stream = response.pipe(zlib.createGunzip());
+            } else if (contentEncoding === 'deflate') {
+                console.log(`  Content-Encoding: deflate (decompressing)`);
+                stream = response.pipe(zlib.createInflate());
+            }
+
             const totalSize = parseInt(response.headers['content-length'], 10);
             let downloadedSize = 0;
-            
+
             response.on('data', (chunk) => {
                 downloadedSize += chunk.length;
                 if (totalSize) {
@@ -63,15 +85,23 @@ function downloadFile(url, destPath) {
                     process.stdout.write(`\r  Progress: ${percent}% (${(downloadedSize / 1024 / 1024).toFixed(2)} MB)`);
                 }
             });
-            
-            response.pipe(file);
-            
+
+            stream.pipe(file);
+
             file.on('finish', () => {
                 file.close();
                 console.log(`\n  Saved to: ${destPath}`);
                 resolve();
             });
-            
+
+            stream.on('error', (err) => {
+                file.close();
+                if (fs.existsSync(destPath)) {
+                    fs.unlinkSync(destPath);
+                }
+                reject(err);
+            });
+
             file.on('error', (err) => {
                 file.close();
                 if (fs.existsSync(destPath)) {
