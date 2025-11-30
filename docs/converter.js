@@ -461,16 +461,19 @@ function handleWorkerMessage(e) {
                             // Ignore cleanup errors - files might already be gone
                         }
 
-                        // Create a Blob with the appropriate MIME type
+                        // Get the MIME type for the output format
                         const mimeType = mimeTypes[format] || 'application/octet-stream';
-                        const blob = new Blob([outputData], { type: mimeType });
 
                         updateStatus('Conversion complete', false);
 
                         // Send the result back to the requesting window
+                        // Note: We send the raw data as ArrayBuffer instead of Blob
+                        // because Blob transfer via postMessage can be unreliable.
+                        // The receiver will reconstruct the Blob.
                         request.source.postMessage({
                             type: 'result',
-                            blob: blob,
+                            data: outputData.buffer,  // ArrayBuffer
+                            mimeType: mimeType,
                             format: format,
                             requestId: requestId
                         }, request.targetOrigin);

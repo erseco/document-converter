@@ -370,14 +370,22 @@
             }
 
             async function handleConversionResult(result, filename, format, autoDownload) {
-                if (!result.blob) {
-                    throw new Error('No result blob received');
+                // Support both old format (blob) and new format (data + mimeType)
+                let blob;
+                if (result.blob) {
+                    blob = result.blob;
+                } else if (result.data) {
+                    // Reconstruct Blob from ArrayBuffer
+                    const mimeType = result.mimeType || 'application/octet-stream';
+                    blob = new Blob([result.data], { type: mimeType });
+                } else {
+                    throw new Error('No result data received');
                 }
 
                 const outputExt = getOutputExtension(format);
                 const outputFilename = filename.replace(/\.[^.]+$/, '.' + outputExt);
 
-                resultBlobUrl = URL.createObjectURL(result.blob);
+                resultBlobUrl = URL.createObjectURL(blob);
                 resultFilename = outputFilename;
 
                 spinner.classList.add('hidden');

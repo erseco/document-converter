@@ -177,8 +177,8 @@ window.addEventListener('message', (event) => {
     }
     
     if (event.data.type === 'result') {
-        // Handle the converted blob
-        const blob = event.data.blob;
+        // Reconstruct Blob from ArrayBuffer
+        const blob = new Blob([event.data.data], { type: event.data.mimeType });
         const url = URL.createObjectURL(blob);
         // Download or display the result
     }
@@ -222,7 +222,8 @@ converterIframe.contentWindow.postMessage({
 // Listen for results
 window.addEventListener('message', (event) => {
     if (event.data.type === 'result') {
-        const pdfBlob = event.data.blob;
+        // Reconstruct Blob from ArrayBuffer
+        const pdfBlob = new Blob([event.data.data], { type: event.data.mimeType });
         // Handle the converted PDF
     }
 });
@@ -243,7 +244,7 @@ class DocumentConverterClient {
 
     _initMessageListener() {
         window.addEventListener('message', (event) => {
-            const { type, requestId, blob, format, error, ready } = event.data;
+            const { type, requestId, data, mimeType, format, error, ready } = event.data;
 
             if (type === 'ready') {
                 this.isReady = true;
@@ -260,6 +261,8 @@ class DocumentConverterClient {
                 clearTimeout(timeoutId);
 
                 if (type === 'result') {
+                    // Reconstruct Blob from ArrayBuffer
+                    const blob = new Blob([data], { type: mimeType });
                     resolve({ blob, format });
                 } else if (type === 'error') {
                     reject(new Error(error));
@@ -380,7 +383,7 @@ try {
 | Type | Properties | Description |
 |------|------------|-------------|
 | `ready` | - | Converter has finished initializing |
-| `result` | `blob`, `format`, `requestId` | Successful conversion result |
+| `result` | `data`, `mimeType`, `format`, `requestId` | Successful conversion result (data is ArrayBuffer) |
 | `error` | `error`, `requestId` | Conversion error message |
 | `pong` | `ready`, `requestId` | Health check response |
 
